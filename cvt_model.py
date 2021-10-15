@@ -23,6 +23,14 @@ class CVTModel(nn.Module):
 
         super().__init__()
 
+        # inputs cols:
+        self.inputs_cols = [
+            'context_indices', 'pos_indices', 'polar_indices',
+            'target',
+            'len_s', 'len_t',
+            'mask_s', 'mask_t'
+        ]
+
         # tokenizer
         self.tokenizer = tokenizer
         self.device = device
@@ -52,11 +60,11 @@ class CVTModel(nn.Module):
                                device=self.device,
                                mode=mode)
 
-    def evaluate_acc_f1(self, src, target, len_x, len_y, mask_x, mask_y):
+    def evaluate_acc_f1(self, context, pos, polar, target, len_x, len_y, mask_x, mask_y):
         # target:batch,max_len ; mask:batch,max_len  len_x: batch
         max_t = len_y.max()
         polar_flag = self.primary.build_polar_flag(max_t)
-        predict = self.forward(src, target, len_x, len_y, mask_x, mask_y,
+        predict = self.forward(context, pos, polar, target, len_x, len_y, mask_x, mask_y,
                                predict=True).argmax(dim=-1).transpose(0, 1)  # batch,max_t
 
         # need to convert polar_index to 0/1/2
@@ -76,26 +84,26 @@ class CVTModel(nn.Module):
 
         return torch.masked_select(_target, _mask_y), torch.masked_select(_predict, _mask_y)
 
-    def forward(self, src, target, len_x, len_y, mask_x, mask_y,
+    def forward(self, context, pos, polar, target, len_x, len_y, mask_x, mask_y,
                 mode='labeled', predict=False):
         # src:[batch*context,batch*pos,batch*polar]
         # target:batch,max_len ;len_x/leny:batch
         # mask_x/mask_y:batch,max_len
 
         # encoder_out:batch,seq_len,hidden_size*2 ; last_hidden:layers*2,batch,hidden_size
-        encoder_out, last_hidden = self.encoder(*src, len_x, mask_x)
+        encoder_out, last_hidden = self.encoder(context, pos, polar, len_x, mask_x)
 
         if mode == "labeled":  # 监督训练
             self._unfreeze_model()
             if not predict:
-                loss = self.primary.calculate_loss(x=src[0], len_x=len_x,
+                loss = self.primary.calculate_loss(x=context, len_x=len_x,
                                                    encoder_out=encoder_out,
                                                    hidden=last_hidden,
                                                    target=target, len_t=len_y, mask_t=mask_y)
 
                 return loss
             else:
-                predict = self.primary.predict(x=src[0], len_x=len_x,
+                predict = self.primary.predict(x=context, len_x=len_x,
                                                encoder_out=encoder_out,
                                                hidden=last_hidden,
                                                target=target, len_t=len_y)

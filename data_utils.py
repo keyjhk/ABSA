@@ -349,12 +349,12 @@ class ABSADataset(Dataset):
                 'context_indices': val['context_indices'],
                 'pos_indices': val['pos_indices'],
                 'polar_indices': val['polar_indices'],
-                'aspect_boundary': None,
-                'target': None,
+                'aspect_boundary': 0,
+                'target': 0,
                 'len_s': val['context_len'],
-                'len_t': None,
+                'len_t': 0,
                 'mask_s': val['context_indices'] != pad_token_idx,  # mask for src
-                'mask_t': None  # mask for target
+                'mask_t': 0  # mask for target
             }
             if combine:
                 target = []  # (as,ae,p),..eos_position
@@ -364,7 +364,6 @@ class ABSADataset(Dataset):
                     target.append(val['polarity'][i])  # p
                 target.append(val['context_len'] - 1)  # eos position in context
 
-                data_item['aspect_boundary'] = val['aspect_boundary']
                 data_item['len_t'] = len(target)
 
                 mask_t = np.zeros(max_seq_len, dtype=np.bool)

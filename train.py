@@ -51,6 +51,7 @@ class Instructor:
                               device=self.device,
                               mode=self.mode
                               ).to(self.device)
+        self.inputs_cols = self.model.inputs_cols
         # load model state
         model_cpt = list(filter(lambda x: re.match(r'model_epoch\w+', x), os.listdir('state')))
         model_cpt = model_cpt[-1] if len(model_cpt) > 0 else None
@@ -80,24 +81,18 @@ class Instructor:
         n_correct, n_total = 0, 0
         t_targets_all, t_outputs_all = None, None
         loss = []
-        for src, target, len_x, len_y, mask_x, mask_y in dataloader:
+        for batch in dataloader:
             # src:[batch*context,batch*pos,batch*polar]
             # target:batch,max_len ;len_x/leny:batch
             # mask_x/mask_y:batch,max_len
 
-            src = [x.to(self.device) for x in src]
-            target = target.to(self.device)
-            len_x = len_x.to(self.device)
-            len_y = len_y.to(self.device)
-            mask_x = mask_x.to(self.device)
-            mask_y = mask_y.to(self.device)
-
+            inputs = [batch[col].to(self.device) for col in self.inputs_cols]
             with torch.no_grad():
                 loss.append(
-                    self.model(src, target, len_x, len_y, mask_x, mask_y).item()
+                    self.model(*inputs).item()
                 )
                 # batch,len?
-                t_targets, t_outputs = self.model.evaluate_acc_f1(src, target, len_x, len_y, mask_x, mask_y)
+                t_targets, t_outputs = self.model.evaluate_acc_f1(*inputs)
                 n_correct += (t_outputs == t_targets).sum().item()
                 n_total += len(t_outputs)
 
@@ -132,16 +127,10 @@ class Instructor:
         for i in range(self.start_epoch, self.epoches + 1):
             print('epoch:{}'.format(i))
             print('=' * 100)
-            for p, (src, target, len_x, len_y, mask_x, mask_y) in enumerate(self.trainloader):
-                src = [x.to(self.device) for x in src]
-                target = target.to(self.device)
-                len_x = len_x.to(self.device)
-                len_y = len_y.to(self.device)
-                mask_x = mask_x.to(self.device)
-                mask_y = mask_y.to(self.device)
-
+            for p, batch in enumerate(self.trainloader):
+                inputs = [batch[col].to(self.device) for col in self.inputs_cols]
                 self.optimizer.zero_grad()
-                loss = self.model(src, target, len_x, len_y, mask_x, mask_y)
+                loss = self.model(*inputs)
                 loss.backward()
 
                 percent = 100 * p / len(self.trainloader)

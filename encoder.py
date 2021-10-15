@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 
 from layers.attention import Attention, squeeze_embedding
+from layers.laynorm import LayerNorm
 
 
 class Encoder(nn.Module):
@@ -46,6 +47,7 @@ class Encoder(nn.Module):
             nn.Tanh(),
             nn.Dropout(p=0.1)
         )
+        self.laynorm= LayerNorm(self.hidden_size)
 
     def self_attention(self, k):
         # q==k batch,seq_len,hidden_size
@@ -53,26 +55,6 @@ class Encoder(nn.Module):
         scores = F.softmax(scores, dim=-1)
         return scores
 
-    def forwards(self, word, pos, polar, len_x, mask_x):
-        # word/pos/polar: batch,max_len  ;len_x:batch
-        word_embedding = self.word_embedding(word)  # batch,max_len,word_embed_size
-        pos_embedding = self.pos_embedding(pos)  # batch,max_len,pos_embed_size
-        polar_embedding = self.polar_embedding(polar)  # batch,max_len,polar_embed_size
-        x = torch.cat((word_embedding, pos_embedding, polar_embedding), dim=-1)  # batch,max_len,embed_size(word+pos)
-
-        # word+pos+polar to gru
-        pad_x = pack_padded_sequence(x, len_x.cpu(), batch_first=True, enforce_sorted=False)
-        gru_out, hidden = self.gru(pad_x)  # hidden:layer*direction,batch,hidden_size
-        gru_out, _ = pad_packed_sequence(gru_out, batch_first=True)  # batch,seq_len,hidden_size*2
-
-        # attention for hidden/sentiment
-        # polar_embedding = squeeze_embedding(polar_embedding, len_x)  # batch,seq_len,hidden_size
-        # mask_x = squeeze_embedding(mask_x, len_x, padding_value=True)  # batch,seq_len
-        # _, score = self.att_senti(gru_out, gru_out, mask=mask_x)  # batch,seq_len,seq_len
-        # polar = torch.bmm(score, polar_embedding)  # bach,seq_len,hidden_size
-        # fuse  batch,seq_len,hidden_size*3==>batch,seq_len,hidden_size
-        hs = self.hs(gru_out)
-        return hs, hidden
 
     def forward(self, word, pos, polar, len_x, mask_x):
         # word/pos/polar: batch,max_len  ;len_x:batch
@@ -94,4 +76,5 @@ class Encoder(nn.Module):
         polar = torch.bmm(score, polar_embedding)  # bach,seq_len,hidden_size
         # fuse  batch,seq_len,hidden_size*3==>batch,seq_len,hidden_size
         hs = self.hs(torch.cat((gru_out, polar), dim=-1))
+        hs = self.laynorm(hs)
         return hs, hidden
