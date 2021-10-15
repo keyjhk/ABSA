@@ -111,7 +111,7 @@ def unicodeToAscii(s):
     )
 
 
-def pad_and_truncate(sequence, maxlen, value, dtype='int64'):
+def pad_and_truncate(sequence, maxlen, value=0, dtype='int64'):
     x = (np.ones(maxlen) * value).astype(dtype)
     trunc = sequence[:maxlen]
     trunc = np.asarray(trunc, dtype=dtype)
@@ -268,16 +268,19 @@ class Tokenizer(object):
 
 class ABSADataset(Dataset):
     def __init__(self, fname, tokenizer, write_file=False, dat_fname='state/absa_dataset_', combine=True):
+        self.all_data = {}
         self.data = []
         self.dataset_name = os.path.basename(fname)
         self.tokenizer = tokenizer
         self.combine = combine  # 是否合并一句话里的多个aspect
 
-        dat_fname = dat_fname + self.dataset_name + '.pkl'
+        dat_fname = dat_fname + self.dataset_name + '.pkl'  # save
 
         if os.path.exists(dat_fname):
             print('loading absa_dataset:', dat_fname)
-            self.data = pickle.load(open(dat_fname, 'rb'))
+            datas = pickle.load(open(dat_fname, 'rb'))
+            self.data = datas['data']
+            self.all_data = datas['all_data']
         else:
             fin = open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore')
             lines = fin.readlines()
@@ -293,10 +296,11 @@ class ABSADataset(Dataset):
 
                 # text(no aspect),context(text with aspect)
                 add_eos = combine  # 当需要组合的时候，末尾添加eos_token
+                pad_idx = self.tokenizer.word2idx[PAD_TOKEN]
+
                 text_indices = tokenizer.text_to_sequence(text_left + " " + aspect + " " + text_right, add_eos=add_eos)
                 context_indices = tokenizer.text_to_sequence(context, add_eos=add_eos)
-                context_len = len(tokenizer.tokenize(context)) + 1 if add_eos else len(
-                    tokenizer.tokenize(context))  # 原句子长度+1 eos
+                context_len = np.sum(context_indices != pad_idx)
                 left_indices = tokenizer.text_to_sequence(text_left)
                 right_indices = tokenizer.text_to_sequence(text_right)
                 aspect_indices = tokenizer.text_to_sequence(aspect)
@@ -305,7 +309,7 @@ class ABSADataset(Dataset):
                 left_len = len(tokenizer.tokenize(text_left))
                 aspect_boundary = np.asarray([left_len, left_len + aspect_len - 1], dtype=np.int64)
                 polarity = int(polarity) + 1  # neg:0 neu:1 pos:2
-                pos_indices, polar_indices = tokenizer.text_to_pos_polar(context)
+                pos_indices, polar_indices = tokenizer.text_to_pos_polar(context)  # part of speech/polar
 
                 if all_data.get(context):
                     # context aspect
@@ -326,50 +330,55 @@ class ABSADataset(Dataset):
                         'polarity': [polarity],
                     }
 
-            # formatted file
+            self.build_dataset(all_data)
             if write_file:
                 self.write_formarted_datafile(all_data)
 
-            pickle.dump(self.data, open(dat_fname, 'wb'))
-
-        self.statistic()
+            pickle.dump({'data': self.data,
+                         'all_data': self.all_data},
+                        open(dat_fname, 'wb'))
+        self.statistic(self.all_data)
 
     def build_dataset(self, all_data):
+        self.all_data = all_data
         combine = self.combine
-        if combine:
-            # format data to src,target
-            # seq,pos,polar : ae,as,p,...,eos_position
-            for x, y in all_data.items():
-                src = [y['context_indices'], y['pos_indices'], y['polar_indices']]  # content,pos,polar
+        max_seq_len = self.tokenizer.max_seq_len
+        pad_token_idx = self.tokenizer.word2idx[PAD_TOKEN]
+        for context, val in all_data.items():
+            data_item = {
+                'context_indices': val['context_indices'],
+                'pos_indices': val['pos_indices'],
+                'polar_indices': val['polar_indices'],
+                'aspect_boundary': None,
+                'target': None,
+                'len_s': val['context_len'],
+                'len_t': None,
+                'mask_s': val['context_indices'] != pad_token_idx,  # mask for src
+                'mask_t': None  # mask for target
+            }
+            if combine:
                 target = []  # (as,ae,p),..eos_position
-                for i in range(len(y['polarity'])):
-                    target.append(y['aspect_boundary'][i][0])  # as
-                    target.append(y['aspect_boundary'][i][1])  # ae
-                    target.append(y['polarity'][i])  # p
-                target.append(y['context_len'] - 1)  # eos position
+                for i in range(len(val['polarity'])):
+                    target.append(val['aspect_boundary'][i][0])  # as
+                    target.append(val['aspect_boundary'][i][1])  # ae
+                    target.append(val['polarity'][i])  # p
+                target.append(val['context_len'] - 1)  # eos position in context
 
-                len_x = y['context_len']
-                len_y = len(target)
-                # 对齐target
-                target = pad_and_truncate(target, tokenizer.max_seq_len, 0)  # 用0填充 最后用mask标记即可
-                # mask_s for pad_token(don't need attention) ;mask_t for not pad_token(calculate_loss)
-                mask_s = y['context_indices'] == tokenizer.word2idx[PAD_TOKEN]
-                mask_t = target != -1
-                self.data.append((src, target, len_x, len_y, mask_s, mask_t))
-        else:
-            # format data to src,target:0
-            # src:(seq,pos,polar,apect) target:polarity of apsect
-            for x, y in all_data.items():
-                src, target = [], []
-                for i in range(len(y['polarity'])):
-                    # content,pos,polar,aspect_boundary
-                    src.extend([y['context_indices'],
-                                y['pos_indices'],
-                                y['polar_indices'],
-                                y['aspect_boundary'][i]])
+                data_item['aspect_boundary'] = val['aspect_boundary']
+                data_item['len_t'] = len(target)
 
-                    target.append(y['polarity'][i])  # p
-                    self.data.append(src, target)
+                mask_t = np.zeros(max_seq_len, dtype=np.bool)
+                mask_t[:len(target)] = True
+                data_item['mask_t'] = mask_t
+                data_item['target'] = pad_and_truncate(target, max_seq_len)
+
+                self.data.append(data_item)
+            else:
+                # 1 contex 1 aspect
+                for i in range(len(val['polarity'])):
+                    data_item['target'] = val['polarity'][i]
+                    data_item['aspect_boundary'] = val['aspect_boundary'][i]
+                    self.data.append(data_item)
 
     def write_formarted_datafile(self, data):
         tokenizer = self.tokenizer
@@ -388,29 +397,40 @@ class ABSADataset(Dataset):
                 t += str(content_len - 1)
                 f.write(t + '\n' * 2)
 
-    def statistic(self):
-        # 统计数据集
-        data = self.data
+    def statistic(self, data):
+        '''
+        all_data[context] = {
+                        'text_indices': [np.array],
+                        'context_indices': np.array,
+                        'context_len': int,
+                        'pos_indices': np.array,
+                        'polar_indices': np.array,
+                        'left_aspect_right_indices': [(left_indices, aspect_indices, right_indices)],
+                        'aspect_boundary': [np.array[start,end],..],
+                        'polarity': [polarity(0/1),..],
+                    }
+        :param all_data:
+        :return:
+        '''
+
         tokenizer = self.tokenizer
         sentences = 0
         aspects = set()
-        pos, neg, neu = 0, 0, 0
-        for x, y, len_x, len_y, *mask in data:
-            # x:content,pos,polar y:[as,ae polar,...,eos_position]
-            content = tokenizer.sequence_to_text(x[0][:len_x], tokenizer.idx2word).split()
-            for i in range(0, len_y - 1, 3):
-                aspect_start, aspect_end, polar = y[i:i + 3]
-                aspect = ' '.join(content[aspect_start:aspect_end + 1])
+        polar_count = {}.fromkeys(tokenizer.polar2idx.keys(), 0)
+
+        for context, val in data.items():
+            words = context.split(' ')
+            for i in range(len(val['polarity'])):
+                aspect_start, aspect_end = val['aspect_boundary'][i]
+                aspect = ' '.join(words[aspect_start:aspect_end + 1])
                 aspects.add(aspect)
-                if polar == tokenizer.polar2idx[POS_LABEL]:
-                    pos += 1
-                elif polar == tokenizer.polar2idx[NEU_LABEL]:
-                    neu += 1
-                else:
-                    neg += 1
+                polar = tokenizer.idx2polar[val['polarity'][i]]
+                polar_count[polar] = polar_count.get(polar) + 1
+
             sentences += 1
-        print('dataset:[{}] \nsentences:{} aspects:{} [ pos:{} neu:{} neg:{} ]\n'.format(
-            self.dataset_name, sentences, len(aspects), pos, neu, neg))
+
+        print('dataset:[{}] \nsentences:{} aspects:{} polars:[{}]\n'.format(
+            self.dataset_name, sentences, len(aspects), polar_count))
 
     def __getitem__(self, index):
         return self.data[index]
