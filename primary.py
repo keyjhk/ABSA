@@ -1,9 +1,10 @@
 import random
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 import torch.nn.functional as F
 from data_utils import SOS_TOKEN
-from layers.attention import Attention
+from layers.attention import Attention, NoQueryAttention, squeeze_embedding
 
 
 class Decoder(nn.Module):
@@ -103,9 +104,8 @@ class Decoder(nn.Module):
             for i in range(0, len(num_aspect), 2):
                 s, e = aspect_positions[_batch, i], aspect_positions[_batch, i + 1]
                 aspect = self.word_embedding(x[_batch, s:e + 1])
-                aspects.append(aspect / (e-s+1))
+                aspects.append(aspect / (e - s + 1))
         return torch.stack(aspects)  # ?,word_embed_size
-
 
     def predict(self, x, len_x, encoder_out, hidden, target, len_t):
         # x(means context):batch,max_len ;encoder_out:batch,seq_len,hidden_size
@@ -157,3 +157,46 @@ class Decoder(nn.Module):
                     decoder_in = self.index_convert(target[:, t], x, max_x)  # given the aspect boundary
 
         return torch.stack(output)  # max_t,batch,seq_len+num_polar
+
+
+class Primay(nn.Module):
+    def __init__(self, hidden_dim, word_embed_dim, polar_dim, num_polar):
+        super().__init__()
+        assert hidden_dim % 2 == 0
+        self.polar_gru = nn.GRU(polar_dim, hidden_dim//2, batch_first=True, bidirectional=True)
+
+        self.aspect_u = nn.Linear(word_embed_dim, word_embed_dim)
+        self.attention_pc = NoQueryAttention(hidden_dim * 2,
+                                             score_function='bi_linear')  # polar_hidden and context
+        self.attention_ac = NoQueryAttention(word_embed_dim + hidden_dim,
+                                             score_function='bi_linear')  # aspect and context
+        self.dense = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, num_polar)
+        )
+
+    def forward(self, encoder_out, polar, aspect, len_x):
+        # encoder_out:batch,seq_len,hidden_size ;polar:batch,seq_len,polar_size;
+        # aspect:batch,1,word_embed_dim
+
+        max_x = len_x.max()
+        # squeeze embedding
+        pad_polar = pack_padded_sequence(polar, len_x.cpu(),
+                                         batch_first=True,enforce_sorted=False)
+        polar_out,_ = self.polar_gru(pad_polar)  # batch,seq_len,polar_dim
+        polar_out, _ = pad_packed_sequence(polar_out,batch_first=True)
+
+        pc = torch.cat((encoder_out, polar_out), dim=-1)  # batch,seq_len,hidden_dim*2
+        _, scores = self.attention_pc(pc)  # batch,1,seq_len
+        r_pc = torch.bmm(scores, encoder_out)  # batch,1,hidden_size
+
+        aspect_u = self.aspect_u(aspect)  # batch,1,word_embed_dim
+        ac = torch.cat((encoder_out, aspect_u.expand(-1, max_x, -1)), dim=-1)
+        _, scores = self.attention_ac(ac)
+        r_ac = torch.bmm(scores, encoder_out)  # batch,1,hidden_size
+
+        r = torch.cat((r_pc, r_ac), dim=-1).squeeze(1)  # batch,hidden_size*2
+
+        out = self.dense(r)  # batch,num_polar  交叉熵会进行softmax
+        return out

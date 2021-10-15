@@ -169,6 +169,7 @@ class Tokenizer(object):
         self.word2idx = {}
         self.idx2word = {}
         self.idx = 0
+        self.pad_token_idx = special_tokens.index(PAD_TOKEN)
 
         # special tokens
         if special_tokens:
@@ -267,7 +268,7 @@ class Tokenizer(object):
 
 
 class ABSADataset(Dataset):
-    def __init__(self, fname, tokenizer, write_file=False, dat_fname='state/absa_dataset_', combine=True):
+    def __init__(self, fname, tokenizer, write_file=False, dat_fname='state/absa_dataset_', combine=False):
         self.all_data = {}
         self.data = []
         self.dataset_name = os.path.basename(fname)
@@ -316,6 +317,7 @@ class ABSADataset(Dataset):
                     all_data[context]['text_indices'].append(text_indices)
                     all_data[context]['left_aspect_right_indices'].append((left_indices, aspect_indices, right_indices))
                     all_data[context]['aspect_boundary'].append(aspect_boundary)
+                    all_data[context]['aspect_indices'].append(aspect_indices)
                     all_data[context]['polarity'].append(polarity)
                 else:
                     # 一句话里可能有多个属性
@@ -325,6 +327,7 @@ class ABSADataset(Dataset):
                         'context_len': context_len,
                         'pos_indices': pos_indices,
                         'polar_indices': polar_indices,
+                        'aspect_indices': [aspect_indices],
                         'left_aspect_right_indices': [(left_indices, aspect_indices, right_indices)],
                         'aspect_boundary': [aspect_boundary],
                         'polarity': [polarity],
@@ -349,6 +352,7 @@ class ABSADataset(Dataset):
                 'context_indices': val['context_indices'],
                 'pos_indices': val['pos_indices'],
                 'polar_indices': val['polar_indices'],
+                'aspect_indices':0,
                 'aspect_boundary': 0,
                 'target': 0,
                 'len_s': val['context_len'],
@@ -376,6 +380,7 @@ class ABSADataset(Dataset):
                 # 1 contex 1 aspect
                 for i in range(len(val['polarity'])):
                     data_item['target'] = val['polarity'][i]
+                    data_item['aspect_indices'] = val['aspect_indices'][i]
                     data_item['aspect_boundary'] = val['aspect_boundary'][i]
                     self.data.append(data_item)
 
