@@ -76,5 +76,5 @@ class Encoder(nn.Module):
         polar = torch.bmm(score, polar_embedding)  # bach,seq_len,hidden_size
         # fuse  batch,seq_len,hidden_size*3==>batch,seq_len,hidden_size
         hs = self.hs(torch.cat((gru_out, polar), dim=-1))
-        hs = self.laynorm(hs)
+        # hs = self.laynorm(hs)
         return hs, hidden
