@@ -10,7 +10,7 @@ from data_utils import *
 from cvt_model import CVTModel
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-EPOCH = 50
+EPOCH = 20
 PRINT_EVERY = 1
 
 
@@ -38,11 +38,13 @@ class Instructor:
         self.best_model = None
         # logger
         self.logger = self.set_logger()
-
         self.init_dataset()
         self.init_model()
         self.loss = nn.CrossEntropyLoss()
-        self.optimizer = opt.Adam(self.model.parameters(), lr=1e-3)
+        self.optimizer = opt.Adam(self.model.parameters(), lr=1e-3,weight_decay=0.01)  #  weight_decay=0.01
+
+        # load
+        self.load()
 
     def init_dataset(self):
         max_seq_len = self.max_seq_len
@@ -76,9 +78,21 @@ class Instructor:
                               mode=self.mode
                               ).to(self.device)
         self.inputs_cols = self.model.inputs_cols
+        # self._reset_params()
 
-        # load model state
-        self.load()
+    def _reset_params(self):
+        for name,p in self.model.named_parameters():
+            if 'embed' in name:
+                print('skip parameter: {}'.format(name))
+                continue
+            if p.requires_grad:
+                if len(p.shape) > 1:
+                    torch.nn.init.xavier_uniform_(p)
+                else:
+                    stdv = 1. / math.sqrt(p.shape[0])
+                    torch.nn.init.uniform_(p, a=-stdv, b=stdv)
+
+            # print('=' * 30)
 
     @classmethod
     def set_logger(cls):
@@ -123,6 +137,7 @@ class Instructor:
     def save(self, model, epoch, acc, f1):
         states = {
             'model': model.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
             'epoch': epoch,
             'acc': acc,
             'f1': f1,
@@ -139,17 +154,27 @@ class Instructor:
             best_model_name = model_cpt[-1]
             print('best_model_name:{}'.format(best_model_name))
             model_cpt = torch.load(open('state/' + best_model_name, 'rb'))
-            model_state = model_cpt['model']
             self.start_epoch = model_cpt['epoch']
-            self.model.load_state_dict(model_state)
+            self.model.load_state_dict(model_cpt['model'])
+            self.optimizer.load_state_dict(model_cpt['optimizer'])
 
-    def eval(self):
+    def eval(self, times=5):
         # in testloader
         print('=' * 30,
               '\nTEST EVAL\n',
               '=' * 30)
-        acc, f1, loss = self._evaluate_acc_f1(self.testloader)
+        acc, f1, loss = 0, 0, 0
+        for t in range(times):
+            _acc, _f1, _loss = self._evaluate_acc_f1(self.testloader)
+            acc += _acc
+            f1 += _f1
+            loss += _loss
+        acc /= times
+        f1 /= times
+        loss /= times
         print('loss:{:.4f} acc:{:.2f}% f1:{:2f}'.format(loss, acc, f1))
+        self.logger.info('TEST EVAL'.center(30, '='))
+        self.logger.info('loss:{:.4f} acc:{:.2f}% f1:{:2f}'.format(loss, acc, f1))
 
     def run(self):
         max_val_acc = 0
@@ -182,7 +207,7 @@ class Instructor:
 
             if i % self.print_every == 0:
                 acc, f1, loss = self._evaluate_acc_f1(self.validloader)
-                info = 'epoch:{} loss:{:.4f} acc:{:.2f}% f1:{:2f} '.format(i, acc, f1, loss)
+                info = 'epoch:{} loss:{:.4f} acc:{:.2f}% f1:{:2f} '.format(i, loss, acc, f1)
                 print('=' * 30,
                       '\nVALID EVAL\n',
                       info + '\n',

@@ -14,9 +14,9 @@ from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 class Attention(nn.Module):
     def __init__(self, embed_dim, hidden_dim=None, out_dim=None, n_head=1, score_function='dot_product', dropout=0):
         ''' Attention Mechanism
-        :param embed_dim:
-        :param hidden_dim:
-        :param out_dim:
+        :param embed_dim: 没有进行wq/wk映射前的原始向量维度
+        :param hidden_dim: wq/wk 映射后的向量维度 ，q与k向量维度是统一的
+        :param out_dim: 映射scores*v的维度
         :param n_head: num of head (Multi-Head Attention)
         :param score_function: scaled_dot_product / mlp (concat) / bi_linear (general dot)
         :return (?, q_len, out_dim,)
