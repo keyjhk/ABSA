@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from encoder import Encoder
-from primary import Primay
+from primary import *
 
 
 class CVTModel(nn.Module):
@@ -49,7 +49,12 @@ class CVTModel(nn.Module):
                                )
 
         # primary  parameters
-        self.primary = Primay(hidden_dim=encoder_hidden_size * 2,
+        # self.primary = Primay(hidden_dim=encoder_hidden_size * 2,
+        #                       word_embed_dim=word_embedding_size,
+        #                       polar_dim=polar_embedding_size,
+        #                       num_polar=num_polar)
+
+        self.primary = PrimayTest(hidden_dim=encoder_hidden_size * 2,
                               word_embed_dim=word_embedding_size,
                               polar_dim=polar_embedding_size,
                               num_polar=num_polar)

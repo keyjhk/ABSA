@@ -10,10 +10,8 @@ from data_utils import *
 from cvt_model import CVTModel
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-EPOCH = 100
+EPOCH = 50
 PRINT_EVERY = 1
-SAVA_EVERY = 10
-BEST_MODEL = ''
 
 
 class Instructor:
@@ -26,7 +24,6 @@ class Instructor:
         self.start_epoch = 1
         self.step_every = 1
         self.print_every = PRINT_EVERY
-        self.save_every = SAVA_EVERY
         self.mode = mode
         # dataset/dataloader
         self.datasetname = dataset
@@ -56,9 +53,10 @@ class Instructor:
         self.tokenizer = tokenizer
         self.pretrain_embedding = build_embedding_matrix(tokenizer.word2idx)
 
-        dataset_fname = 'data/semeval14/{}_Train.xml.seg'.format(self.datasetname)
-        trainset = ABSADataset(fname=dataset_fname, tokenizer=tokenizer)
-        testset = ABSADataset(fname=dataset_fname, tokenizer=tokenizer)
+        train_fname = 'data/semeval14/{}_Train.xml.seg'.format(self.datasetname)
+        test_fname = 'data/semeval14/{}_Test_Gold.xml.seg'.format(self.datasetname)
+        trainset = ABSADataset(fname=train_fname, tokenizer=tokenizer)
+        testset = ABSADataset(fname=test_fname, tokenizer=tokenizer)
         valset_len = int(len(trainset) * valid_ratio)
         trainset, validset = random_split(trainset, [len(trainset) - valset_len, valset_len])
 
@@ -80,13 +78,7 @@ class Instructor:
         self.inputs_cols = self.model.inputs_cols
 
         # load model state
-        model_cpt = list(filter(lambda x: re.match(r'model_epoch\w+', x), os.listdir('state')))
-        model_cpt = model_cpt[-1] if len(model_cpt) > 0 else None
-        if model_cpt:
-            model_cpt = torch.load(open('state/' + model_cpt, 'rb'))
-            model_state = model_cpt['model']
-            self.start_epoch = model_cpt['epoch']
-            self.model.load_state_dict(model_state)
+        self.load()
 
     @classmethod
     def set_logger(cls):
@@ -135,19 +127,29 @@ class Instructor:
             'acc': acc,
             'f1': f1,
         }
-        fname = 'model_epoch{}_acc_{:.2f}_f1_{:.2f}.pkl'.format(epoch, acc, f1)
+        fname = 'model_epoch{}_acc_{:.2f}_f1_{:.2f}_{}.pkl'.format(epoch, acc, f1, self.datasetname)
         self.best_model = fname
         torch.save(states, open('state/' + fname, 'wb'))
 
+    def load(self):
+        model_cpt = list(filter(lambda x: re.match(r'model_\w+', x), os.listdir('state')))
+        model_cpt.sort(key=lambda x: float(x.split('_')[3]))  # sorted by acc
+
+        if len(model_cpt) > 0:
+            best_model_name = model_cpt[-1]
+            print('best_model_name:{}'.format(best_model_name))
+            model_cpt = torch.load(open('state/' + best_model_name, 'rb'))
+            model_state = model_cpt['model']
+            self.start_epoch = model_cpt['epoch']
+            self.model.load_state_dict(model_state)
+
     def eval(self):
         # in testloader
-        best_model = torch.load(open('state/' + 'model_epoch9_acc_97.22_f1_96.52.pkl', 'rb'))
-        self.model.load_state_dict(best_model['model'])
         print('=' * 30,
               '\nTEST EVAL\n',
               '=' * 30)
-        acc,f1,loss = self._evaluate_acc_f1(self.testloader)
-        print('loss:{:.4f} acc:{:.2f}% f1:{:2f}'.format(loss,acc, f1))
+        acc, f1, loss = self._evaluate_acc_f1(self.testloader)
+        print('loss:{:.4f} acc:{:.2f}% f1:{:2f}'.format(loss, acc, f1))
 
     def run(self):
         max_val_acc = 0
@@ -171,10 +173,10 @@ class Instructor:
                 targets = batch['target'].to(self.device)
                 n_correct += (torch.argmax(out, -1) == targets).sum().item()
                 n_total += len(out)
-                loss_total += loss.item() * len(out)
+                loss_total += loss.item()
                 if p % self.step_every == 0:
                     train_acc = 100 * n_correct / n_total
-                    train_loss = loss_total / n_total
+                    train_loss = loss_total / p
                     print('percent:{:.2f}%, loss:{:.4f}, acc:{:.2f}%'.format(percent, train_loss, train_acc))
                     print('-' * 30)
 
@@ -193,9 +195,12 @@ class Instructor:
                     self.save(self.model, max_val_epoch, acc, f1)
                 if f1 > max_val_f1:
                     max_val_f1 = f1
+
+        self.load()
         self.eval()
+
 
 if __name__ == '__main__':
     instrutor = Instructor(mode='alsc', dataset='Restaurants')
-    # instrutor.run()
-    instrutor.eval()
+    instrutor.run()
+    # instrutor.eval()
