@@ -348,7 +348,8 @@ class ABSADataset(Dataset):
         max_seq_len = self.tokenizer.max_seq_len
         pad_token_idx = self.tokenizer.word2idx[PAD_TOKEN]
         for context, val in all_data.items():
-            data_item = {
+            # meta struct
+            data_meta = {
                 'context_indices': val['context_indices'],
                 'pos_indices': val['pos_indices'],
                 'polar_indices': val['polar_indices'],
@@ -361,6 +362,7 @@ class ABSADataset(Dataset):
                 'mask_t': 0  # mask for target
             }
             if combine:
+                data_item = data_meta.copy()
                 target = []  # (as,ae,p),..eos_position
                 for i in range(len(val['polarity'])):
                     target.append(val['aspect_boundary'][i][0])  # as
@@ -377,9 +379,11 @@ class ABSADataset(Dataset):
 
                 self.data.append(data_item)
             else:
-                # 1 contex 1 aspect
+                # 1 context 1 aspect
                 for i in range(len(val['polarity'])):
+                    data_item = data_meta.copy()
                     data_item['target'] = val['polarity'][i]
+                    data_item['text_indices'] = val['text_indices'][i]
                     data_item['aspect_indices'] = val['aspect_indices'][i]
                     data_item['aspect_boundary'] = val['aspect_boundary'][i]
                     self.data.append(data_item)

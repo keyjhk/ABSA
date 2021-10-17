@@ -15,7 +15,7 @@ PRINT_EVERY = 1
 
 
 class Instructor:
-    def __init__(self, batch_size=32, max_seq_len=85, valid_ratio=0.1, mode='alsc', dataset='Laptops'):
+    def __init__(self, batch_size=16, max_seq_len=85, valid_ratio=0, mode='alsc', dataset='Laptops'):
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         # train parameters
@@ -41,7 +41,9 @@ class Instructor:
         self.init_dataset()
         self.init_model()
         self.loss = nn.CrossEntropyLoss()
-        self.optimizer = opt.Adam(self.model.parameters(), lr=1e-3,weight_decay=0.01)  #  weight_decay=0.01
+
+        _params = filter(lambda p: p.requires_grad, self.model.parameters())
+        self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=0.01)  # weight_decay=0.01
 
         # load
         self.load()
@@ -59,16 +61,18 @@ class Instructor:
         test_fname = 'data/semeval14/{}_Test_Gold.xml.seg'.format(self.datasetname)
         trainset = ABSADataset(fname=train_fname, tokenizer=tokenizer)
         testset = ABSADataset(fname=test_fname, tokenizer=tokenizer)
-        valset_len = int(len(trainset) * valid_ratio)
-        trainset, validset = random_split(trainset, [len(trainset) - valset_len, valset_len])
+        if valid_ratio>0:
+            valset_len = int(len(trainset) * valid_ratio)
+            trainset, validset = random_split(trainset, [len(trainset) - valset_len, valset_len])
+        else:
+            validset = testset
 
-        self.trainloader = DataLoader(dataset=trainset, batch_size=batch_size)
-        self.validloader = DataLoader(dataset=validset, batch_size=batch_size)
-        self.testloader = DataLoader(dataset=testset, batch_size=batch_size)
+        self.trainloader = DataLoader(dataset=trainset, batch_size=batch_size,shuffle=True)
+        self.validloader = DataLoader(dataset=validset, batch_size=batch_size,shuffle=True)
+        self.testloader = DataLoader(dataset=testset, batch_size=batch_size,shuffle=True)
 
     def init_model(self):
         tokenizer = self.tokenizer
-
         self.model = CVTModel(num_words=len(tokenizer.word2idx),
                               num_pos=len(tokenizer.pos2idx),
                               num_polar=len(tokenizer.polar2idx),
@@ -78,11 +82,12 @@ class Instructor:
                               mode=self.mode
                               ).to(self.device)
         self.inputs_cols = self.model.inputs_cols
-        # self._reset_params()
+        self._reset_params()
 
     def _reset_params(self):
-        for name,p in self.model.named_parameters():
+        for name, p in self.model.named_parameters():
             if 'embed' in name:
+                self.logger.info('skip parameter: {}'.format(name))
                 print('skip parameter: {}'.format(name))
                 continue
             if p.requires_grad:
@@ -179,6 +184,7 @@ class Instructor:
     def run(self):
         max_val_acc = 0
         max_val_f1 = 0
+        max_val_epoch = self.start_epoch
 
         for i in range(self.start_epoch, self.epoches + 1):
             print('epoch:{}'.format(i))
@@ -220,6 +226,11 @@ class Instructor:
                     self.save(self.model, max_val_epoch, acc, f1)
                 if f1 > max_val_f1:
                     max_val_f1 = f1
+
+            if i - max_val_epoch > 10:
+                self.logger.info('early stop')
+                print('early stop')
+                break
 
         self.load()
         self.eval()

@@ -167,29 +167,34 @@ class ATAE_LSTMO(nn.Module):
         self.embed = word_embedding
         hidden_dim = hidden_size
         embed_dim = word_embedding.embedding_dim
-        self.squeeze_embedding = SqueezeEmbedding()
-        self.lstm = DynamicLSTM(embed_dim * 2, hidden_dim, num_layers=1, batch_first=True)
+        self.lstm = nn.LSTM(embed_dim * 2, hidden_dim, num_layers=1, batch_first=True)
         self.attention = NoQueryAttention(hidden_dim + embed_dim, score_function='bi_linear')  # origin
         # self.attention = NoQueryAttention(opt.hidden_dim + opt.embed_dim, score_function='dot_product') # origin
         self.dense = nn.Linear(hidden_dim, num_polar)
 
-    def forward(self, context, aspect_pool):
+    def forward(self, text_indices, aspect_indices):
         # context: batch,MAX_LEN  ; aspect_indices:batch,MAX_LEN 用于表示每个batch出现的aspect
         # MAX_LEN 是 sequence最长的长度
-        x_len = torch.sum(context != 0, dim=-1)  # batch
+        x_len = torch.sum(text_indices != 0, dim=-1)  # batch
         x_len_max = torch.max(x_len)  # 计算一个batch 中实际最长序列
+        aspect_len = torch.sum(aspect_indices != 0, dim=-1).float()  # batch
 
-        x = self.embed(context)  # batch,MAX_LEN,embed_dim
+        x = self.embed(text_indices)  # batch,MAX_LEN,embed_dim
         # MAX_LEN ==> max_len ,从 人为规定的长度 切割为 实际最长的长度 底层调用了 packed_pad
         # squeeze_embed 压缩 MAX_LEN 维度
-        x = self.squeeze_embedding(x, x_len)  # batch,MAX_LEN,embed_dim ==> batch,max_len,embed_dim
-
+        x = squeeze_embedding(x, x_len.cpu())  # batch,MAX_LEN,embed_dim ==> batch,max_len,embed_dim
+        aspect = self.embed(aspect_indices)  # batch,MAX_LEN ==> batch,MAX_LEN,embed_dim
+        # 这一步是取aspect的平均向量 来源于论文的做法  sum/len
+        # batch,embed_dim [DIV] batch,1 ==> batch,embed_dim
+        aspect_pool = torch.div(torch.sum(aspect, dim=1), aspect_len.unsqueeze(1))
         # batch,1,embed_dim ==> batch,max_len,embed_dim  扩展时间步，便于和输入拼接
-        aspect = aspect_pool.expand(-1, x_len_max, -1)  # aspect embedding
+        aspect = aspect_pool.unsqueeze(1).expand(-1, x_len_max, -1)  # aspect embedding
         x = torch.cat((aspect, x), dim=-1)  # batch,max_len,embed_dim*2
 
         # batch,max_len,hidden_size
-        h, (_, _) = self.lstm(x, x_len)
+        pad_x = pack_padded_sequence(x, x_len.cpu(), batch_first=True, enforce_sorted=False)
+        h, (_, _) = self.lstm(pad_x)
+        h, _ = pad_packed_sequence(h, batch_first=True)
         # hidden 隐藏向量 和 aspect向量再作一次拼接
         ha = torch.cat((h, aspect), dim=-1)  # batch,max_len,hidden_size*2
 

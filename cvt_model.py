@@ -27,7 +27,8 @@ class CVTModel(nn.Module):
         self.inputs_cols = [
             'context_indices', 'pos_indices', 'polar_indices',
             'aspect_indices', 'aspect_boundary',
-            'target', 'len_s'
+            'target', 'len_s',
+            'text_indices'
         ]
 
         # tokenizer
@@ -36,7 +37,7 @@ class CVTModel(nn.Module):
         self.mode = mode
         # embedding for word/pos/polar
         self.word_embedding = nn.Embedding.from_pretrained(
-            torch.tensor(pretrained_embedding,dtype=torch.float))
+            torch.tensor(pretrained_embedding, dtype=torch.float))
         self.pos_embedding = nn.Embedding(num_pos, pos_embedding_size)
         self.polar_embedding = nn.Embedding(num_pos, polar_embedding_size)
         # encoders parameters
@@ -56,9 +57,9 @@ class CVTModel(nn.Module):
         #                            hidden_size=encoder_hidden_size,
         #                            )
 
-        self.encoder = ATAE_LSTMO(num_polar,
-                                 word_embedding=self.word_embedding,
-                                 hidden_size=encoder_hidden_size)
+        self.encoder = ATAE_LSTM(num_polar,
+                                  word_embedding=self.word_embedding,
+                                  hidden_size=encoder_hidden_size)
 
         # primary  parameters
         # self.primary = Primay(hidden_dim=encoder_hidden_size * 2,
@@ -80,7 +81,7 @@ class CVTModel(nn.Module):
 
     def forward(self, context, pos, polar,
                 aspect_indices, aspect_boundary,
-                target, len_x,
+                target, len_x, text_indices,
                 mode='labeled'):
         # context/pos/polar/aspect:batch,MAX_LEN
         # aspect_boundary: batch,2
@@ -99,10 +100,10 @@ class CVTModel(nn.Module):
         # encoder_out = self.encoder(context, aspect, len_x) # get encoder out
 
         if mode == "labeled":  # 监督训练
-            self._unfreeze_model()
+            # self._unfreeze_model()
             # out = self.primary(encoder_out, polar, aspect_pool, len_x)
-            out = self.encoder(context, aspect_pool)  # original atae
-            # out = self.encoder(context, aspect_pool, len_x)  # resume atae
+            # out = self.encoder(text_indices, aspect_indices)  # original atae
+            out = self.encoder(context, aspect_pool, len_x)  # resume atae
             loss = self.loss(out, target)
             return loss, out
         elif mode == "unlabeled":  # 无监督训练
