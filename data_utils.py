@@ -241,14 +241,11 @@ class Tokenizer(object):
         pos_tags = nltk.pos_tag(tokens)  # token
         pos_seq, polar_seq = [], []
         for x in pos_tags:  # token,POS
+            # only care adj and verb
             if x[1].startswith('VB'):
                 pos = 'v'
-            elif x[1].startswith('NN'):
-                pos = 'n'
             elif x[1].startswith('JJ'):
                 pos = 'a'
-            elif x[1].startswith('RB'):
-                pos = 'r'
             else:
                 pos = 'o'
 

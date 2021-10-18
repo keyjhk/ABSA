@@ -204,93 +204,6 @@ class Primay(nn.Module):
         return out
 
 
-class PrimayPolarSA(nn.Module):
-    def __init__(self, hidden_dim, word_embed_dim, polar_dim, num_polar):
-        super().__init__()
-        assert hidden_dim % 2 == 0
-
-        self.aspect_u = nn.Linear(word_embed_dim, word_embed_dim)
-        self.sa = Attention(hidden_dim)  # hidden_dim
-        self.attention_pc = NoQueryAttention(polar_dim + hidden_dim,
-                                             score_function='bi_linear')  # polar + context
-        self.attention_ac = NoQueryAttention(word_embed_dim + hidden_dim,
-                                             score_function='bi_linear')  # aspect + context
-        self.mhsa = Attention(hidden_dim * 3, n_head=5)
-        self.dense = nn.Sequential(
-            nn.Linear(hidden_dim * 3, num_polar)
-        )
-
-    def forward(self, encoder_out, polar, aspect, len_x):
-        # encoder_out:batch,seq_len,hidden_size ;polar:batch,seq_len,polar_size;
-        # aspect:batch,1,word_embed_dim
-
-        max_x = len_x.max()
-        # squeeze embedding
-        polar_out = squeeze_embedding(polar, len_x.cpu())  # batch,seq_len,polar_dim
-
-        pc = torch.cat((encoder_out, polar_out), dim=-1)  # batch,seq_len,hidden_dim+polar_dim
-        _, scores = self.attention_pc(pc)  # batch,1,seq_len
-        r_pc = torch.bmm(scores, encoder_out)  # batch,1,hidden_size
-
-        # aspect_u = self.aspect_u(aspect)  # batch,1,word_embed_dim
-        aspect_u = aspect
-        ac = torch.cat((encoder_out, aspect_u.expand(-1, max_x, -1)), dim=-1)
-        _, scores = self.attention_ac(ac)
-        r_ac = torch.bmm(scores, encoder_out)  # batch,1,hidden_size
-
-        smax = torch.max(encoder_out, dim=1)[0].unsqueeze(1)
-        r = torch.cat((r_pc, r_ac, smax), dim=-1).squeeze(1)  # batch,hidden_size*2
-
-        r, _ = self.mhsa(k=r, q=r)
-
-        out = self.dense(r)  # batch,num_polar  交叉熵会进行softmax
-        return out
-
-
-class PrimayNOAu(nn.Module):
-    def __init__(self, hidden_dim, word_embed_dim, polar_dim, num_polar):
-        super().__init__()
-        assert hidden_dim % 2 == 0
-
-        self.aspect_u = nn.Linear(word_embed_dim, word_embed_dim)
-        self.sa = Attention(hidden_dim)  # hidden_dim
-        self.attention_pc = NoQueryAttention(polar_dim + hidden_dim,
-                                             score_function='bi_linear')  # polar + context
-        self.attention_ac = NoQueryAttention(word_embed_dim + hidden_dim,
-                                             score_function='bi_linear')  # aspect + context
-        self.dense = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.Tanh(),
-            nn.Linear(hidden_dim, num_polar)
-        )
-
-    def forward(self, encoder_out, polar, aspect, len_x):
-        # encoder_out:batch,seq_len,hidden_size ;polar:batch,seq_len,polar_size;
-        # aspect:batch,1,word_embed_dim
-
-        max_x = len_x.max()
-        # squeeze embedding
-        polar_out = squeeze_embedding(polar, len_x.cpu())  # batch,seq_len,polar_dim
-        # self attention here
-        _, scores = self.sa(q=encoder_out, k=encoder_out)  # batch,seq_len,seq_len
-        polar_out = torch.bmm(scores, polar_out)  # batch,seq_len,polar_embed_dim
-
-        pc = torch.cat((encoder_out, polar_out), dim=-1)  # batch,seq_len,hidden_dim+polar_dim
-        _, scores = self.attention_pc(pc)  # batch,1,seq_len
-        r_pc = torch.bmm(scores, encoder_out)  # batch,1,hidden_size
-
-        # aspect_u = self.aspect_u(aspect)  # batch,1,word_embed_dim
-        aspect_u = aspect  # batch,1,word_embed_dim
-        ac = torch.cat((encoder_out, aspect_u.expand(-1, max_x, -1)), dim=-1)
-        _, scores = self.attention_ac(ac)
-        r_ac = torch.bmm(scores, encoder_out)  # batch,1,hidden_size
-
-        r = torch.cat((r_pc, r_ac), dim=-1).squeeze(1)  # batch,hidden_size*2
-
-        out = self.dense(r)  # batch,num_polar  交叉熵会进行softmax
-        return out
-
-
 class PrimayATAE(nn.Module):
     def __init__(self, hidden_dim, word_embed_dim, polar_dim, num_polar):
         super().__init__()
@@ -330,14 +243,17 @@ class PrimayPosition(nn.Module):
         assert hidden_dim % 2 == 0
         self.aspect_u = nn.Linear(word_embed_dim, word_embed_dim)
         self.attention_p = Attention(50)
+        self.lp = nn.ReLU()
         self.attention_hp = NoQueryAttention(50 + hidden_dim, score_function='bi_linear')
         self.attention_hap = NoQueryAttention(word_embed_dim + hidden_dim + position_dim,
                                               score_function='bi_linear')  # aspect + context
+
+        self.attention_s = Attention(hidden_dim, n_head=3, score_function='scaled_dot_product')
         self.dense = nn.Sequential(
             nn.Linear(hidden_dim * 3, hidden_dim),
             nn.Tanh(),
-            nn.Linear(hidden_dim, num_polar),
-
+            nn.Dropout(p=0.5),
+            nn.Linear(hidden_dim, num_polar)
         )
 
     def forward(self, encoder_out, position, polar, aspect, len_x):
@@ -346,29 +262,25 @@ class PrimayPosition(nn.Module):
 
         max_x = len_x.max()
 
-        # aspect_u = self.aspect_u(aspect)  # batch,1,word_embed_dim
-        aspect_u = aspect
+        aspect_u = self.aspect_u(aspect)  # batch,1,word_embed_dim
+        # aspect_u = aspect
 
+        # sp
         position = squeeze_embedding(position, len_x.cpu())
         polar = squeeze_embedding(polar, len_x.cpu())
         polar, _ = self.attention_p(k=polar, q=polar)
-
         hp = torch.cat((encoder_out, polar), dim=-1)
         _, scores = self.attention_hp(hp)
         sp = torch.bmm(scores, encoder_out).squeeze(1)  # batch,hidden_size
-
+        # sa
         hap = torch.cat((encoder_out, position, aspect_u.expand(-1, max_x, -1)), dim=-1)
-
         _, scores = self.attention_hap(hap)
         sa = torch.bmm(scores, encoder_out).squeeze(1)  # batch,hidden_size
+        # smax
         s_max = torch.max(encoder_out, dim=1)[0].squeeze(1)  # batch,hidden_size
-        hn = encoder_out[:, -1, :]  # batch,hidden_size
 
-        s = torch.cat((sa, s_max, hn), dim=-1)  # batch,hidden_size*3
+        # concat
+        s = torch.cat((sa, s_max, sp), dim=-1)
 
-        # test
-        # s = torch.cat((hn, s_max), dim=-1)  # batch,hidden_size*2
-
-        # atae just use r_ac
         out = self.dense(s)
         return out  # batch,num_polar

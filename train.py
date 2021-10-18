@@ -240,25 +240,13 @@ class Instructor:
                 if f1 > max_val_f1:
                     max_val_f1 = f1
 
-            if i - max_val_epoch > 10:
+            if i - max_val_epoch > 5:
                 self.logger.info('early stop')
                 print('early stop')
                 break
 
         self.load()
         self.eval()
-
-
-def main():
-    input_colses = {
-        'atae_lstm': ['text_indices', 'aspect_indices', 'aspect_boundary'],
-        'cvt': [
-            'context_indices', 'pos_indices', 'polar_indices',
-            'aspect_indices', 'aspect_boundary',
-            'target', 'len_s',
-            'text_indices'
-        ]
-    }
 
 
 if __name__ == '__main__':
