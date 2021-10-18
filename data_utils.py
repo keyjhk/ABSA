@@ -221,6 +221,18 @@ class Tokenizer(object):
     def tokenize(self, text, islower=True):
         return text.lower().split() if islower else text.split()
 
+    def text_to_position(self, text_len, aspect_boundary):
+        left_len = aspect_boundary[0]
+        aspect_len = aspect_boundary[1] - aspect_boundary[0] + 1
+        right_len = text_len - left_len - aspect_len
+
+        left_seq = list(range(left_len, 0, -1))
+        aspect_seq = [0]*aspect_len
+        right_seq = list(range(1, right_len + 1))
+        # 余下的填充为上限距离 表示不相关
+        return pad_and_truncate(left_seq+aspect_seq+right_seq,
+                                self.max_seq_len, value=self.max_seq_len)
+
     def text_to_pos_polar(self, text):
         '''
         verb: VB; noun: NN; adjecttive: JJ; adverb： VB; other： O
@@ -264,11 +276,11 @@ class Tokenizer(object):
         return pad_and_truncate(sequence, self.max_seq_len, value=self.word2idx[PAD_TOKEN])
 
     def sequence_to_text(self, sequence, idx2char, skip_word=None):
-        return ' '.join(idx2char[idx] for idx in sequence if idx != skip_word)
+        return ' '.join(str(idx2char[idx]) for idx in sequence if idx != skip_word)
 
 
 class ABSADataset(Dataset):
-    def __init__(self, fname, tokenizer, write_file=False, dat_fname='state/absa_dataset_', combine=False):
+    def __init__(self, fname, tokenizer, write_file=True, dat_fname='state/absa_dataset_', combine=False):
         self.all_data = {}
         self.data = []
         self.dataset_name = os.path.basename(fname)
@@ -308,9 +320,11 @@ class ABSADataset(Dataset):
 
                 aspect_len = len(tokenizer.tokenize(aspect))
                 left_len = len(tokenizer.tokenize(text_left))
+                right_len = len(tokenizer.tokenize(text_right))
                 aspect_boundary = np.asarray([left_len, left_len + aspect_len - 1], dtype=np.int64)
                 polarity = int(polarity) + 1  # neg:0 neu:1 pos:2
                 pos_indices, polar_indices = tokenizer.text_to_pos_polar(context)  # part of speech/polar
+                position_indices = tokenizer.text_to_position(context_len, aspect_boundary)
 
                 if all_data.get(context):
                     # context aspect
@@ -318,6 +332,7 @@ class ABSADataset(Dataset):
                     all_data[context]['left_aspect_right_indices'].append((left_indices, aspect_indices, right_indices))
                     all_data[context]['aspect_boundary'].append(aspect_boundary)
                     all_data[context]['aspect_indices'].append(aspect_indices)
+                    all_data[context]['position_indices'].append(position_indices)
                     all_data[context]['polarity'].append(polarity)
                 else:
                     # 一句话里可能有多个属性
@@ -327,6 +342,7 @@ class ABSADataset(Dataset):
                         'context_len': context_len,
                         'pos_indices': pos_indices,
                         'polar_indices': polar_indices,
+                        'position_indices': [position_indices],
                         'aspect_indices': [aspect_indices],
                         'left_aspect_right_indices': [(left_indices, aspect_indices, right_indices)],
                         'aspect_boundary': [aspect_boundary],
@@ -353,7 +369,8 @@ class ABSADataset(Dataset):
                 'context_indices': val['context_indices'],
                 'pos_indices': val['pos_indices'],
                 'polar_indices': val['polar_indices'],
-                'aspect_indices':0,
+                'position_indices': 0,
+                'aspect_indices': 0,
                 'aspect_boundary': 0,
                 'target': 0,
                 'len_s': val['context_len'],
@@ -384,6 +401,7 @@ class ABSADataset(Dataset):
                     data_item = data_meta.copy()
                     data_item['target'] = val['polarity'][i]
                     data_item['text_indices'] = val['text_indices'][i]
+                    data_item['position_indices'] = val['position_indices'][i]
                     data_item['aspect_indices'] = val['aspect_indices'][i]
                     data_item['aspect_boundary'] = val['aspect_boundary'][i]
                     self.data.append(data_item)
@@ -396,6 +414,27 @@ class ABSADataset(Dataset):
                 f.write(tokenizer.sequence_to_text(y['context_indices'][:content_len], tokenizer.idx2word) + '\n')
                 f.write(tokenizer.sequence_to_text(y['pos_indices'][:content_len], tokenizer.idx2pos) + '\n')
                 f.write(tokenizer.sequence_to_text(y['polar_indices'][:content_len], tokenizer.idx2polar) + '\n')
+                t = ''
+                for i in range(len(y['polarity'])):
+                    sidx, eidx = y['aspect_boundary'][i][0], y['aspect_boundary'][i][1]
+                    aspect = ' '.join(x.split()[sidx:eidx + 1])
+                    polarity = y["polarity"][i]
+                    t += aspect + ' ' + str(sidx) + ',' + str(eidx) + ' ' + str(polarity) + '\t'
+                t += str(content_len - 1)
+                f.write(t + '\n' * 2)
+
+
+
+        with open('state/formated_datafile.txt', 'w', encoding='utf8') as f:
+            for x, y in data.items():
+                content_len = y['context_len']
+                f.write(tokenizer.sequence_to_text(y['context_indices'][:content_len], tokenizer.idx2word) + '\n')
+                f.write(tokenizer.sequence_to_text(y['pos_indices'][:content_len], tokenizer.idx2pos) + '\n')
+                f.write(tokenizer.sequence_to_text(y['polar_indices'][:content_len], tokenizer.idx2polar) + '\n')
+                for i in range(len(y['polarity'])):
+                    f.write(tokenizer.sequence_to_text(y['position_indices'][i][:content_len],
+                                                       list(range(tokenizer.max_seq_len))) + '\n')
+
                 t = ''
                 for i in range(len(y['polarity'])):
                     sidx, eidx = y['aspect_boundary'][i][0], y['aspect_boundary'][i][1]

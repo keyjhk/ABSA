@@ -88,6 +88,7 @@ class Instructor:
         tokenizer = self.tokenizer
         self.model = CVTModel(num_pos=len(tokenizer.pos2idx),
                               num_polar=len(tokenizer.polar2idx),
+                              num_position = tokenizer.max_seq_len,
                               pretrained_embedding=self.pretrain_embedding,
                               combine=self.model_name,
                               ).to(self.device)
@@ -114,7 +115,7 @@ class Instructor:
 
         Format = '%(asctime)s - %(levelname)s: %(message)s'
         logger_file = 'logger_{}_{}_{}.log'.format(self.datasetname, self.model_name,
-                                                   strftime("%y%m%d-%H%M", localtime()))
+                                                   strftime("%m%d-%H%M", localtime()))
         logger_file = 'state/' + logger_file
         file_hander = logging.FileHandler(logger_file, mode='w', encoding='utf8')
         file_hander.setFormatter(logging.Formatter(Format))
@@ -261,12 +262,6 @@ def main():
 
 
 if __name__ == '__main__':
-    # instrutor = Instructor(dataset='restaurant')
-    # instrutor = Instructor(dataset='restaurant',model='cvt')
-    # instrutor = Instructor(dataset='restaurant',model='cvte1')
-    # instrutor = Instructor(dataset='restaurant',model='cvtnopos')
-    # instrutor = Instructor(dataset='restaurant',model='cvtnopos-polarsa')
-    # instrutor = Instructor(dataset='restaurant',model='cvt-polarsa')
-    instrutor = Instructor(dataset='restaurant',model='cvt-polarnoau')
+    instrutor = Instructor(dataset='restaurant',model='cvt-at-position')
     instrutor.run()
     # instrutor.eval()
