@@ -2,5 +2,6 @@ state/*
 test*
 .ipynb_checkpoints
 data/glove.42B.300d.txt
+data/unlabeled
 .idea
 __pycache__
