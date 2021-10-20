@@ -250,9 +250,9 @@ class PrimayPosition(nn.Module):
 
         self.attention_s = Attention(hidden_dim, n_head=3, score_function='scaled_dot_product')
         self.dense = nn.Sequential(
-            nn.Linear(hidden_dim * 3, hidden_dim),
-            nn.Tanh(),
+            nn.Linear(hidden_dim * 2, hidden_dim),
             nn.Dropout(p=0.5),
+            nn.Tanh(),
             nn.Linear(hidden_dim, num_polar)
         )
 
@@ -265,9 +265,10 @@ class PrimayPosition(nn.Module):
         aspect_u = self.aspect_u(aspect)  # batch,1,word_embed_dim
         # aspect_u = aspect
 
-        # sp
+        # squeeze
         position = squeeze_embedding(position, len_x.cpu())
         polar = squeeze_embedding(polar, len_x.cpu())
+        # sp
         polar, _ = self.attention_p(k=polar, q=polar)
         hp = torch.cat((encoder_out, polar), dim=-1)
         _, scores = self.attention_hp(hp)
@@ -280,7 +281,108 @@ class PrimayPosition(nn.Module):
         s_max = torch.max(encoder_out, dim=1)[0].squeeze(1)  # batch,hidden_size
 
         # concat
-        s = torch.cat((sa, s_max, sp), dim=-1)
+        s = torch.cat((s_max, sa), dim=-1)
+
+        out = self.dense(s)
+        return out  # batch,num_polar
+
+
+class PrimayPP(nn.Module):
+    def __init__(self, hidden_dim, word_embed_dim, position_dim, num_polar):
+        super().__init__()
+        assert hidden_dim % 2 == 0
+        self.aspect_u = nn.Linear(word_embed_dim, word_embed_dim)
+        self.attention_p = Attention(50 + 50)
+
+        self.attention_hp = NoQueryAttention(100 + hidden_dim, score_function='bi_linear')
+        self.attention_hap = NoQueryAttention(word_embed_dim + hidden_dim + position_dim,
+                                              score_function='bi_linear')  # aspect + context
+
+        self.attention_s = Attention(hidden_dim, n_head=3, score_function='scaled_dot_product')
+        self.dense = nn.Sequential(
+            nn.Linear(hidden_dim * 3, hidden_dim),
+            nn.Dropout(p=0.5),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, num_polar)
+        )
+
+    def forward(self, encoder_out, position, polar, aspect, len_x):
+        # encoder_out:batch,seq_len,hidden_size ;polar:batch,seq_len,polar_size;
+        # aspect:batch,1,word_embed_dim
+
+        max_x = len_x.max()
+
+        aspect_u = self.aspect_u(aspect)  # batch,1,word_embed_dim
+        # aspect_u = aspect
+
+        # squeeze
+        position = squeeze_embedding(position, len_x.cpu())
+        polar = squeeze_embedding(polar, len_x.cpu())
+        polar = torch.cat((polar, position), dim=-1)
+        # sp
+        polar, _ = self.attention_p(k=polar, q=polar)  # self attention
+        hp = torch.cat((encoder_out, polar), dim=-1)
+        _, scores = self.attention_hp(hp)
+        sp = torch.bmm(scores, encoder_out).squeeze(1)  # batch,hidden_size
+        # sa
+        hap = torch.cat((encoder_out, position, aspect_u.expand(-1, max_x, -1)), dim=-1)
+        _, scores = self.attention_hap(hap)
+        sa = torch.bmm(scores, encoder_out).squeeze(1)  # batch,hidden_size
+        # smax
+        s_max = torch.max(encoder_out, dim=1)[0].squeeze(1)  # batch,hidden_size
+
+        # concat
+        s = torch.cat((s_max, sa, sp), dim=-1)
+
+        out = self.dense(s)
+        return out  # batch,num_polar
+
+
+class PrimayIMN(nn.Module):
+    def __init__(self, hidden_dim, word_embed_dim, position_dim, num_polar):
+        super().__init__()
+        assert hidden_dim % 2 == 0
+        self.aspect_u = nn.Linear(word_embed_dim, word_embed_dim)
+        self.attention_p = Attention(50)
+        self.lp = nn.ReLU()
+        self.attention_hp = NoQueryAttention(100 + hidden_dim, score_function='bi_linear')
+        self.attention_hap = NoQueryAttention(word_embed_dim + hidden_dim + position_dim,
+                                              score_function='bi_linear')  # aspect + context
+
+        self.attention_s = Attention(hidden_dim, n_head=3, score_function='scaled_dot_product')
+        self.dense = nn.Sequential(
+            nn.Linear(hidden_dim * 2 + 100, hidden_dim),
+            nn.Dropout(p=0.5),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, num_polar)
+        )
+
+    def forward(self, encoder_out, position, polar, aspect, len_x):
+        # encoder_out:batch,seq_len,hidden_size ;polar:batch,seq_len,polar_size;
+        # aspect:batch,1,word_embed_dim
+
+        max_x = len_x.max()
+
+        aspect_u = self.aspect_u(aspect)  # batch,1,word_embed_dim
+        # aspect_u = aspect
+
+        # squeeze
+        position = squeeze_embedding(position, len_x.cpu())
+
+        # sp
+        # polar, _ = self.attention_p(k=polar, q=polar)
+        hp = torch.cat((encoder_out, polar), dim=-1)
+        _, scores = self.attention_hp(hp)
+        sp = torch.bmm(scores, polar).squeeze(1)  # batch,polar_size
+        # sa
+        hap = torch.cat((encoder_out, position, aspect_u.expand(-1, max_x, -1)), dim=-1)
+        _, scores = self.attention_hap(hap)
+        sa = torch.bmm(scores, encoder_out).squeeze(1)  # batch,hidden_size
+        # smax
+        s_max = torch.max(encoder_out, dim=1)[0].squeeze(1)  # batch,hidden_size
+
+        # concat
+        s = torch.cat((sp, sa, s_max), dim=-1)
 
         out = self.dense(s)
         return out  # batch,num_polar

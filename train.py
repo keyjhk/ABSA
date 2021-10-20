@@ -250,6 +250,7 @@ class Instructor:
 
 
 if __name__ == '__main__':
-    instrutor = Instructor(dataset='restaurant',model='cvt-at-position')
+    # instrutor = Instructor(dataset='restaurant',model='cvt-at-position')
+    instrutor = Instructor(dataset='laptop',model='cvt-at-position')
     instrutor.run()
     # instrutor.eval()

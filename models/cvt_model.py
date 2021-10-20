@@ -43,13 +43,18 @@ class CVTModel(nn.Module):
         self.position_embedding = nn.Embedding(num_position + 1, position_embedding_size)
 
         if self.name == 'cvt-at-position':
-            self.encoder = EncoderPosition(word_embedding_size,
-                                           position_embedding_size,
-                                           encoder_hidden_size)
-            self.primary = PrimayPosition(hidden_dim=encoder_hidden_size * 2,
-                                          word_embed_dim=word_embedding_size,
-                                          position_dim=position_embedding_size,
-                                          num_polar=num_polar)
+            # self.encoder = EncoderPosition(word_embedding_size,
+            #                                position_embedding_size,
+            #                                encoder_hidden_size)
+            # self.primary = PrimayPosition(hidden_dim=encoder_hidden_size * 2,
+            #                         word_embed_dim=word_embedding_size,
+            #                         position_dim=position_embedding_size,
+            #                         num_polar=num_polar)
+            self.encoder = Test(word_embed_dim=word_embedding_size,
+                                position_embed_dim=position_embedding_size,
+                                polar_embed_dim=polar_embedding_size,
+                                hidden_dim=encoder_hidden_size,
+                                num_polar=num_polar)
 
         elif self.name == 'atae':
             self.encoder = atae_lstm.ATAE_LSTM(num_polar, self.word_embedding, encoder_hidden_size)
@@ -90,8 +95,9 @@ class CVTModel(nn.Module):
         if mode == "labeled":  # 监督训练
             # self._unfreeze_model()
             if self.name.startswith('cvt'):
-                encoder_out = self.encoder(word, position, len_x)  # get encoder out
-                out = self.primary(encoder_out, position, polar, aspect_pool, len_x)
+                # encoder_out = self.encoder(word, position, len_x)  # get encoder out
+                out = self.encoder(word, position, polar, aspect_pool, len_x)
+                # out = self.primary(word_out, position, polar_out, aspect_pool, len_x)
             elif self.name == 'atae':
                 out = self.encoder(context, aspect_pool, len_x)  # resume atae
 

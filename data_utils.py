@@ -72,8 +72,8 @@ class SentiWordNet:
             # key:word#pos value:[[rank,score],..]
             # sum softmax(1/rank)*score
             scores, ranks = [], []
-            for v in value:
-                ranks.append(math.exp(1 / int(v[0])))
+            for v in value:  # rank,score
+                ranks.append(math.exp(1 / int(v[0])))  # weight: e^(1/rank)
                 scores.append(v[1])
             ranks = [x / sum(ranks) for x in ranks]  # softmax
             score = sum(ranks[i] * scores[i] for i in range(len(ranks)))  # weighted_score
@@ -227,10 +227,10 @@ class Tokenizer(object):
         right_len = text_len - left_len - aspect_len
 
         left_seq = list(range(left_len, 0, -1))
-        aspect_seq = [0]*aspect_len
+        aspect_seq = [0] * aspect_len
         right_seq = list(range(1, right_len + 1))
         # 余下的填充为上限距离 表示不相关
-        return pad_and_truncate(left_seq+aspect_seq+right_seq,
+        return pad_and_truncate(left_seq + aspect_seq + right_seq,
                                 self.max_seq_len, value=self.max_seq_len)
 
     def text_to_pos_polar(self, text):
@@ -420,8 +420,6 @@ class ABSADataset(Dataset):
                 t += str(content_len - 1)
                 f.write(t + '\n' * 2)
 
-
-
         with open('state/formated_datafile.txt', 'w', encoding='utf8') as f:
             for x, y in data.items():
                 content_len = y['context_len']
@@ -475,6 +473,12 @@ class ABSADataset(Dataset):
 
         print('dataset:[{}] \nsentences:{} aspects:{} polars:[{}]\n'.format(
             self.dataset_name, sentences, len(aspects), polar_count))
+        statistics = {
+            'sentences': sentences,
+            "aspect": aspects,
+            "polar_count": polar_count
+        }
+        pickle.dump(statistics, open('state/statistic_{}.pkl'.format(self.dataset_name), 'wb'))
 
     def __getitem__(self, index):
         return self.data[index]
