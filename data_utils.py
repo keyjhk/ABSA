@@ -329,6 +329,7 @@ class ABSADataset(Dataset):
         :return: alldata
         '''
         all_data = {}
+        tokenizer = self.tokenizer
         combine = self.combine
         with open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore') as f:
             while True:
@@ -464,16 +465,16 @@ class ABSADataset(Dataset):
                 context = tokenizer.sequence_to_text(y['context_indices'][:content_len], tokenizer.idx2word)
                 pos = tokenizer.sequence_to_text(y['pos_indices'][:content_len], tokenizer.idx2pos)
                 polar = tokenizer.sequence_to_text(y['polar_indices'][:content_len], tokenizer.idx2polar)
-                ct_pos_polar = '\n'.join([context, pos, polar, '\n'])
+                ct_pos_polar = '\n'.join([context, pos, polar, ''])
 
                 t = ''
                 for i in range(len(y['polarity'])):
                     sidx, eidx = y['aspect_boundary'][i][0], y['aspect_boundary'][i][1]
-                    aspect = ' '.join(x.split()[sidx:eidx + 1])
+                    aspect = ' '.join(context.split()[sidx:eidx + 1])
                     polarity = y["polarity"][i]
-                    t += "{} {},{} {}\t".format(aspect, sidx, eidx, polarity)
+                    t += "{} {},{} {}\t\t".format(aspect, sidx, eidx, polarity)
 
-                t += str(content_len - 1)
+                t += str(content_len)
                 f.write(ct_pos_polar)
                 f.write(t + '\n' * 2)
 
@@ -525,8 +526,10 @@ class ABSADataset(Dataset):
                 aspect_start, aspect_end = val['aspect_boundary'][i]
                 aspect = ' '.join(words[aspect_start:aspect_end + 1])
                 aspects.add(aspect)
-                polar = tokenizer.idx2polar[val['polarity'][i]]
-                polar_count[polar] = polar_count.get(polar) + 1
+                polarity = val['polarity'][i]
+                if polarity != -1:  # labeled
+                    polar = tokenizer.idx2polar[polarity]
+                    polar_count[polar] = polar_count.get(polar) + 1
 
             sentences += 1
 
@@ -541,12 +544,38 @@ class ABSADataset(Dataset):
         return len(self.data)
 
 
+class MixDataLoader:
+    def __init__(self, labeled_loader, unlabeld_loader, semi_supervised=True):
+        self.labeled_loader = labeled_loader
+        self.unlabeled_loader = unlabeld_loader
+        self.semi_supervised = semi_supervised
+        self.label_len = len(labeled_loader)
+        self.unlabel_len = len(unlabeld_loader)
+
+    def _endless_labeled(self):
+        while True:
+            for batch in self.labeled_loader:
+                yield batch
+
+    def alternating_batch(self):
+        labeled_loader = self._endless_labeled()  # generator
+        while True:
+            for u_batch in self.unlabeled_loader:
+                yield next(labeled_loader), 'labeled'
+                if self.semi_supervised:
+                    yield u_batch, 'unlabeled'
+
+
+
 if __name__ == '__main__':
     # test()
     tokenizer = build_tokenizer(max_seq_len=MAX_SEQ_LEN)
-    ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
-    ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
-    ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
-    ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
-
-    build_embedding_matrix(tokenizer.word2idx)
+    # build_embedding_matrix(tokenizer.word2idx)
+    # labeled
+    # ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
+    # ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
+    # ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
+    # ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
+    # unlabeled
+    ABSADataset(fname='data/unlabeled/formated_electronic.txt', tokenizer=tokenizer)
+    ABSADataset(fname='data/unlabeled/formated_yelp_review.txt', tokenizer=tokenizer)

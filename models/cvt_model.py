@@ -50,7 +50,7 @@ class CVTModel(nn.Module):
             #                         word_embed_dim=word_embedding_size,
             #                         position_dim=position_embedding_size,
             #                         num_polar=num_polar)
-            self.encoder = Test(word_embed_dim=word_embedding_size,
+            self.encoder = Test1(word_embed_dim=word_embedding_size,
                                 position_embed_dim=position_embedding_size,
                                 polar_embed_dim=polar_embedding_size,
                                 hidden_dim=encoder_hidden_size,

@@ -11,37 +11,38 @@ from data_utils import *
 from models.cvt_model import CVTModel
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-EPOCH = 50
-PRINT_EVERY = 1
-
+PRINT_EVERY = 1  # how many epoches
+STEP_EVERY = 0.1 # 0<x<1 ,percent in labeled data
 
 class Instructor:
     def __init__(self, batch_size=16, max_seq_len=85, valid_ratio=0,
-                 mode='alsc', dataset='laptop', model='atae'):
+                 mode='alsc', dataset='laptop', model='atae', semi_supervised=False):
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
+        self.semi_supervised = semi_supervised
         # train parameters
         self.device = DEVICE
-        self.epoches = EPOCH
-        self.start_epoch = 1
-        self.step_every = 1
+        self.start_epoch = 0
         self.print_every = PRINT_EVERY
         self.mode = mode
         # dataset/dataloader
         self.dataset_files = {
             'restaurant': {
                 'train': 'data/semeval14/Restaurants_Train.xml.seg',
-                'test': 'data/semeval14/Restaurants_Test_Gold.xml.seg'
+                'test': 'data/semeval14/Restaurants_Test_Gold.xml.seg',
+                'unlabeled': 'data/unlabeled/formated_yelp_review.txt'
             },
             'laptop': {
                 'train': 'data/semeval14/Laptops_Train.xml.seg',
-                'test': 'data/semeval14/Laptops_Test_Gold.xml.seg'
+                'test': 'data/semeval14/Laptops_Test_Gold.xml.seg',
+                'unlabeled': 'data/unlabeled/formated_electronic.txt'
             }
         }
         self.datasetname = dataset
         self.valid_ratio = valid_ratio
         self.trainset, self.validset, self.testset = None, None, None
         self.trainloader, self.validloader, self.testloader = None, None, None
+        self.mixloader = None
         self.tokenizer = None
         self.pretrain_embedding = None
         # model
@@ -72,8 +73,11 @@ class Instructor:
 
         train_fname = self.dataset_files[self.datasetname]['train']
         test_fname = self.dataset_files[self.datasetname]['test']
+        unlabel_fname = self.dataset_files[self.datasetname]['unlabeled']
         trainset = ABSADataset(fname=train_fname, tokenizer=tokenizer)
         testset = ABSADataset(fname=test_fname, tokenizer=tokenizer)
+        unlabelset = ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
+
         if valid_ratio > 0:
             valset_len = int(len(trainset) * valid_ratio)
             trainset, validset = random_split(trainset, [len(trainset) - valset_len, valset_len])
@@ -83,12 +87,16 @@ class Instructor:
         self.trainloader = DataLoader(dataset=trainset, batch_size=batch_size, shuffle=True)
         self.validloader = DataLoader(dataset=validset, batch_size=batch_size, shuffle=True)
         self.testloader = DataLoader(dataset=testset, batch_size=batch_size, shuffle=True)
+        unlabeled_loader = DataLoader(dataset=unlabelset, batch_size=batch_size, shuffle=True)
+
+        self.mixloader = MixDataLoader(labeled_loader=self.trainloader,
+                                       unlabeld_loader=unlabeled_loader, semi_supervised=self.semi_supervised)
 
     def init_model(self):
         tokenizer = self.tokenizer
         self.model = CVTModel(num_pos=len(tokenizer.pos2idx),
                               num_polar=len(tokenizer.polar2idx),
-                              num_position = tokenizer.max_seq_len,
+                              num_position=tokenizer.max_seq_len,
                               pretrained_embedding=self.pretrain_embedding,
                               combine=self.model_name,
                               ).to(self.device)
@@ -199,34 +207,38 @@ class Instructor:
         max_val_f1 = 0
         max_val_epoch = self.start_epoch
 
-        for i in range(self.start_epoch, self.epoches + 1):
-            print('epoch:{}'.format(i))
-            print('=' * 100)
-
+        label_steps = self.mixloader.label_len  # how many iters in the labeled dataset
+        train_steps = int(STEP_EVERY*label_steps)  # how many steps then calculate the train acc/loss
+        n_correct, n_total, loss_total = 0, 0, 0
+        for step, (batch, mode) in enumerate(self.mixloader.alternating_batch(), start=1):
             self.model.train()
-            n_correct, n_total, loss_total = 0, 0, 0
-            for p, batch in enumerate(self.trainloader, start=1):
-                self.optimizer.zero_grad()
-                inputs = [batch[col].to(self.device) for col in self.inputs_cols]
-                loss, out = self.model(*inputs)
-                loss.backward()
-                self.optimizer.step()
+            self.optimizer.zero_grad()
+            inputs = [batch[col].to(self.device) for col in self.inputs_cols]
+            loss, out = self.model(*inputs)
+            loss.backward()
+            self.optimizer.step()
 
-                # loss,train_acc
-                percent = 100 * p / len(self.trainloader)
-                targets = batch['target'].to(self.device)
-                n_correct += (torch.argmax(out, -1) == targets).sum().item()
-                n_total += len(out)
-                loss_total += loss.item()
-                if p % self.step_every == 0:
-                    train_acc = 100 * n_correct / n_total
-                    train_loss = loss_total / p
-                    print('percent:{:.2f}%, loss:{:.4f}, acc:{:.2f}%'.format(percent, train_loss, train_acc))
-                    print('-' * 30)
+            # progress
+            _step = step // 2 if self.semi_supervised else step  # alternative
+            epoch = _step // label_steps  # approximately
+            # loss,acc on train , 1 step 1 show
+            percent = 100 * (_step % label_steps) / label_steps
+            targets = batch['target'].to(self.device)
+            n_correct += (torch.argmax(out, -1) == targets).sum().item()
+            n_total += len(out)
+            loss_total += loss.item()
 
-            if i % self.print_every == 0:
+            if _step % train_steps == 0:
+                train_acc = 100 * n_correct / n_total
+                train_loss = loss_total/train_steps
+                n_correct, n_total, loss_total = 0, 0, 0
+                print('percent:{:.2f}%, loss:{:.4f}, acc:{:.2f}%'.format(percent, train_loss, train_acc))
+                print('-' * 30)
+
+            # evaluate in valid
+            if _step % (self.print_every*label_steps) ==0:
                 acc, f1, loss = self._evaluate_acc_f1(self.validloader)
-                info = 'epoch:{} loss:{:.4f} acc:{:.2f}% f1:{:2f} '.format(i, loss, acc, f1)
+                info = 'epoch:{} loss:{:.4f} acc:{:.2f}% f1:{:2f} '.format(epoch, loss, acc, f1)
                 print('=' * 30,
                       '\nVALID EVAL\n',
                       info + '\n',
@@ -235,12 +247,12 @@ class Instructor:
 
                 if acc > max_val_acc:
                     max_val_acc = acc
-                    max_val_epoch = i
+                    max_val_epoch = epoch
                     self.save(self.model, max_val_epoch, acc, f1)
                 if f1 > max_val_f1:
                     max_val_f1 = f1
 
-            if i - max_val_epoch > 5:
+            if epoch - max_val_epoch > 5:
                 self.logger.info('early stop')
                 print('early stop')
                 break
@@ -250,7 +262,7 @@ class Instructor:
 
 
 if __name__ == '__main__':
-    # instrutor = Instructor(dataset='restaurant',model='cvt-at-position')
-    instrutor = Instructor(dataset='laptop',model='cvt-at-position')
+    instrutor = Instructor(dataset='restaurant',model='cvt-at-position')
+    # instrutor = Instructor(dataset='laptop', model='cvt-at-position')
     instrutor.run()
     # instrutor.eval()
