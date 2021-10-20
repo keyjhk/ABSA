@@ -66,7 +66,7 @@ class Instructor:
         valid_ratio = self.valid_ratio
         batch_size = self.batch_size
 
-        tokenizer = build_tokenizer(fnames='data/semeval14', max_seq_len=max_seq_len)
+        tokenizer = build_tokenizer(max_seq_len=max_seq_len)
         self.tokenizer = tokenizer
         self.pretrain_embedding = build_embedding_matrix(tokenizer.word2idx)
 

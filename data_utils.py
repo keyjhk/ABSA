@@ -1,4 +1,5 @@
 import os, math, pickle
+import re
 import string
 
 import nltk
@@ -7,11 +8,36 @@ import numpy as np
 import unicodedata
 from torch.utils.data import Dataset
 
+# dataset file
+# the file format should be:
+# row1: context,replace the aspect with $T$
+# row2: aspect
+# row3: polarity
+
+LABELED_FILES = [
+    'data/semeval14/Laptops_Test_Gold.xml.seg',
+    'data/semeval14/Laptops_Train.xml.seg',
+    'data/semeval14/Restaurants_Test_Gold.xml.seg',
+    'data/semeval14/Restaurants_Train.xml.seg',
+]
+
+UNLABELED_FILES = [
+    'data/unlabeled/formated_electronic.txt',
+    'data/unlabeled/formated_yelp_review.txt',
+
+]
+
+GLOVE_FILE = 'data/glove.42B.300d.txt'
+
+# max seq len
+MAX_SEQ_LEN = 85
+
 # token
 UNK_TOKEN = "<UNK>"
 PAD_TOKEN = "<PAD>"
 SOS_TOKEN = "<SOS>"
 EOS_TOKEN = "<EOS>"
+SPECIAL_TOKENS = [PAD_TOKEN, UNK_TOKEN, SOS_TOKEN, EOS_TOKEN]  # PAD is the first,so its index is 0
 
 # polarity
 NEG_LABEL = 'NEG'
@@ -45,7 +71,7 @@ class SentiWordNet:
             self.senti_dict = pickle.load(open(self.path['save'], 'rb'))
         else:
             self.process()
-        print('dict_len:{}'.format(len(self.senti_dict)))
+        print('senti_dict size:{}'.format(len(self.senti_dict)))
 
     def process(self):
         with open(self.path['dict'], 'r', encoding='utf8') as f:
@@ -83,25 +109,6 @@ class SentiWordNet:
         pickle.dump(self.senti_dict, open(self.path['save'], 'wb'))
 
 
-def test():
-    '''
-    verb: VB
-    noun: NN
-    adjecttive: JJ
-    adverb： VB
-    other： O
-    :return:
-    '''
-    print(nltk.pos_tag('I charge it at night'.split()))
-
-    from torchtext.data.utils import get_tokenizer
-
-    tokenizer = get_tokenizer('basic_english')  # 分词器
-
-    # 分词器输入 句子 ，返回 token序列
-    print(nltk.pos_tag(tokenizer("it's a boy")))  # [i,come,from,china]
-
-
 def unicodeToAscii(s):
     all_letters = string.ascii_letters + " .,;'"
     return ''.join(
@@ -119,61 +126,64 @@ def pad_and_truncate(sequence, maxlen, value=0, dtype='int64'):
     return x
 
 
-def build_tokenizer(fnames, max_seq_len, dat_fname='state/tokenizer.pkl'):
+def build_tokenizer(max_seq_len, dat_fname='state/tokenizer.pkl', unlabeled=True):
     if os.path.exists(dat_fname):
         print('loading tokenizer:', dat_fname)
         tokenizer = pickle.load(open(dat_fname, 'rb'))
     else:
-        tokenizer = Tokenizer(max_seq_len, fname=fnames)
+        fnames = LABELED_FILES + UNLABELED_FILES if unlabeled else LABELED_FILES
+        tokenizer = Tokenizer(max_seq_len, fnames=fnames)
         pickle.dump(tokenizer, open(dat_fname, 'wb'))
+
+    print('vocab size:{}'.format(len(tokenizer.word2idx)))
 
     return tokenizer  # 返回分词器
 
 
 def build_embedding_matrix(word2idx, embed_dim=300, dat_fname='state/embedding_matatrix.pkl'):
+    def _load_word_vec(path, embed_dim, word2idx, ):
+        fin = open(path, 'r', encoding='utf-8', newline='\n', errors='ignore')
+        word_vec = {}
+        for line in fin:
+            tokens = line.rstrip().split()
+            word, vec = ' '.join(tokens[:-embed_dim]), tokens[-embed_dim:]
+            if word in word2idx.keys():
+                word_vec[word] = np.asarray(vec, dtype='float32')
+        return word_vec
+
     if os.path.exists(dat_fname):
         print('loading embedding_matrix:', dat_fname)
         embedding_matrix = pickle.load(open(dat_fname, 'rb'))
     else:
         print('loading word vectors...')
         embedding_matrix = np.zeros((len(word2idx), embed_dim))
-        fname = 'data/glove.42B.300d.txt'
+        fname = GLOVE_FILE
         word_vec = _load_word_vec(fname, word2idx=word2idx, embed_dim=embed_dim)
         print('building embedding_matrix:', dat_fname)
+        ctr = 0
         for word, i in word2idx.items():
             vec = word_vec.get(word)
             if vec is not None:
                 # words not found in embedding index will be all-zeros.
                 embedding_matrix[i] = vec  # 对于glove中的词 我们将其置为vec
+                ctr += 1
+        print('load {} words from glove'.format(ctr))
         pickle.dump(embedding_matrix, open(dat_fname, 'wb'))
     return embedding_matrix
 
 
-def _load_word_vec(path, word2idx=None, embed_dim=300):
-    fin = open(path, 'r', encoding='utf-8', newline='\n', errors='ignore')
-    word_vec = {}
-    for line in fin:
-        tokens = line.rstrip().split()
-        word, vec = ' '.join(tokens[:-embed_dim]), tokens[-embed_dim:]
-        if word in word2idx.keys():
-            word_vec[word] = np.asarray(vec, dtype='float32')
-    return word_vec
-
-
 class Tokenizer(object):
-    def __init__(self, max_seq_len, fname=None,
-                 special_tokens=[PAD_TOKEN, UNK_TOKEN, SOS_TOKEN, EOS_TOKEN]):
+    def __init__(self, max_seq_len, fnames, special_tokens=True):
         self.max_seq_len = max_seq_len
         self.sentidict = SentiWordNet()
         self.max_seq_len = max_seq_len
         self.word2idx = {}
         self.idx2word = {}
         self.idx = 0
-        self.pad_token_idx = special_tokens.index(PAD_TOKEN)
 
         # special tokens
         if special_tokens:
-            for token in special_tokens:
+            for token in SPECIAL_TOKENS:
                 self.word2idx[token] = self.idx
                 self.idx2word[self.idx] = token
                 self.idx += 1
@@ -187,28 +197,25 @@ class Tokenizer(object):
         self.idx2polar = [NEG_LABEL, NEU_LABEL, POS_LABEL]
         self.polar2idx = {x: idx for idx, x in enumerate(self.idx2polar)}
 
-        if fname:
-            self.fit_on_text(self.read_text(fname))
+        # fit on text
+        for fname in fnames:
+            for text in self.read_text(fname):
+                self.fit_on_text(text)
 
-    def read_text(self, fnanme):
-        if os.path.isdir(fnanme):
-            files = []
-            for f in os.listdir(fnanme):
-                files.append(os.path.join(fnanme, f))
-        else:
-            files = [fnanme]
-
-        text = ''
-        for f in files:
-            fin = open(f, 'r', encoding='utf-8', newline='\n', errors='ignore')
-            lines = fin.readlines()
-            fin.close()
-            for i in range(0, len(lines), 3):
-                text_left, _, text_right = [s.lower().strip() for s in lines[i].partition("$T$")]
-                aspect = lines[i + 1].lower().strip()
-                text_raw = text_left + " " + aspect + " " + text_right
-                text += text_raw + " "
-        return text
+    def read_text(self, fname):
+        with open(fname, 'r', encoding='utf-8') as f:
+            ctr = 0
+            while True:
+                context = f.readline().rstrip()
+                if context:
+                    ctr += 1
+                    text_left, _, text_right = [s.lower().strip() for s in context.partition("$T$")]
+                    aspect = f.readline().rstrip().lower()  #
+                    f.readline().rstrip()  # skip polarity/null
+                    yield text_left + " " + aspect + " " + text_right
+                else:
+                    break
+            print('read {} sentences from {}'.format(ctr, fname))
 
     def fit_on_text(self, text):
         words = self.tokenize(text)
@@ -277,86 +284,113 @@ class Tokenizer(object):
 
 
 class ABSADataset(Dataset):
-    def __init__(self, fname, tokenizer, write_file=True, dat_fname='state/absa_dataset_', combine=False):
-        self.all_data = {}
-        self.data = []
-        self.dataset_name = os.path.basename(fname)
+    def __init__(self, fname, tokenizer, write_file=True, combine=False):
+        # data
+        self.all_data = {}  #
+        self.data = []  # for iterater
+        self.statistic_data = {
+            'sentences': None,  # int
+            "aspect": None,  # set
+            "polar_count": None  # {pos:int,neg:int,neu:int}
+        }
+        # dataset name
+        self.dataset_name = os.path.basename(fname)  # get file name
+        self.dat_fname = 'state/absa_dataset_{}.pkl'.format(self.dataset_name)  # for save/load
+        # tokenize
         self.tokenizer = tokenizer
         self.combine = combine  # 是否合并一句话里的多个aspect
 
-        dat_fname = dat_fname + self.dataset_name + '.pkl'  # save
-
-        if os.path.exists(dat_fname):
-            print('loading absa_dataset:', dat_fname)
-            datas = pickle.load(open(dat_fname, 'rb'))
-            self.data = datas['data']
-            self.all_data = datas['all_data']
+        if os.path.exists(self.dat_fname):
+            self.load_dataset()
         else:
-            fin = open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore')
-            lines = fin.readlines()
-            fin.close()
+            self.build_alldata(fname)
+            self.build_dataset()
+            self.statistic()
+            if write_file: self.write_formarted_datafile()
 
-            all_data = {}
-            for i in range(0, len(lines), 3):
-                # 一开始不能小写 会影响 pos词性判断
-                text_left, _, text_right = [s.strip() for s in lines[i].partition("$T$")]
-                aspect = lines[i + 1].strip()
-                polarity = lines[i + 2].strip()
-                context = text_left + " " + aspect + " " + text_right
+            self.save_dataset()
 
-                # text(no aspect),context(text with aspect)
-                add_eos = combine  # 当需要组合的时候，末尾添加eos_token
-                pad_idx = self.tokenizer.word2idx[PAD_TOKEN]
+        print('dataset:[{}] \nsentences:{} aspects:{} polars:[{}]\n'.format(
+            self.dataset_name,
+            self.statistic_data['sentences'],
+            len(self.statistic_data['aspect']),
+            self.statistic_data['polar_count']))
 
-                text_indices = tokenizer.text_to_sequence(text_left + " " + aspect + " " + text_right, add_eos=add_eos)
-                context_indices = tokenizer.text_to_sequence(context, add_eos=add_eos)
-                context_len = np.sum(context_indices != pad_idx)
-                left_indices = tokenizer.text_to_sequence(text_left)
-                right_indices = tokenizer.text_to_sequence(text_right)
-                aspect_indices = tokenizer.text_to_sequence(aspect)
+    def build_alldata(self, fname):
+        '''
+        alldata:{
+            context:{
+                context_indices:,
+                text_indices:,
+                ....
+            }
+        }
+        :param fname:数据集文件
+        :return: alldata
+        '''
+        all_data = {}
+        combine = self.combine
+        with open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore') as f:
+            while True:
+                context = f.readline().rstrip()
+                if context:
+                    text_left, _, text_right = [s.strip() for s in context.partition("$T$")]
+                    aspect = f.readline().rstrip()
+                    polarity = f.readline().rstrip()
 
-                aspect_len = len(tokenizer.tokenize(aspect))
-                left_len = len(tokenizer.tokenize(text_left))
-                right_len = len(tokenizer.tokenize(text_right))
-                aspect_boundary = np.asarray([left_len, left_len + aspect_len - 1], dtype=np.int64)
-                polarity = int(polarity) + 1  # neg:0 neu:1 pos:2
-                pos_indices, polar_indices = tokenizer.text_to_pos_polar(context)  # part of speech/polar
-                position_indices = tokenizer.text_to_position(context_len, aspect_boundary)
+                    context = text_left + " " + aspect + " " + text_right
 
-                if all_data.get(context):
-                    # context aspect
-                    all_data[context]['text_indices'].append(text_indices)
-                    all_data[context]['left_aspect_right_indices'].append((left_indices, aspect_indices, right_indices))
-                    all_data[context]['aspect_boundary'].append(aspect_boundary)
-                    all_data[context]['aspect_indices'].append(aspect_indices)
-                    all_data[context]['position_indices'].append(position_indices)
-                    all_data[context]['polarity'].append(polarity)
+                    # text(no aspect),context(text with aspect)
+                    add_eos = combine  # 当需要组合的时候，末尾添加eos_token
+                    pad_idx = self.tokenizer.word2idx[PAD_TOKEN]
+
+                    # text to indices with same length(max_lemn),numpy ndarray
+                    text_indices = tokenizer.text_to_sequence(text_left + " " + aspect + " " + text_right,
+                                                              add_eos=add_eos)
+                    context_indices = tokenizer.text_to_sequence(context, add_eos=add_eos)
+                    context_len = np.sum(context_indices != pad_idx)
+                    left_indices = tokenizer.text_to_sequence(text_left)
+                    right_indices = tokenizer.text_to_sequence(text_right)
+                    aspect_indices = tokenizer.text_to_sequence(aspect)
+
+                    aspect_len = len(tokenizer.tokenize(aspect))
+                    left_len = len(tokenizer.tokenize(text_left))
+                    aspect_boundary = np.asarray([left_len, left_len + aspect_len - 1], dtype=np.int64)
+                    polarity = int(polarity) + 1 if polarity != '' else -1  # neg:0 neu:1 pos:2 null:-1(unlabeled)
+                    pos_indices, polar_indices = tokenizer.text_to_pos_polar(context)  # part of speech/polar
+                    position_indices = tokenizer.text_to_position(context_len, aspect_boundary)
+
+                    if all_data.get(context):
+                        # context aspect
+                        all_data[context]['text_indices'].append(text_indices)
+                        all_data[context]['left_aspect_right_indices'].append(
+                            (left_indices, aspect_indices, right_indices))
+                        all_data[context]['aspect_boundary'].append(aspect_boundary)
+                        all_data[context]['aspect_indices'].append(aspect_indices)
+                        all_data[context]['position_indices'].append(position_indices)
+                        all_data[context]['polarity'].append(polarity)
+                    else:
+                        # 一句话里可能有多个属性
+                        all_data[context] = {
+                            'text_indices': [text_indices],
+                            'context_indices': context_indices,
+                            'context_len': context_len,
+                            'pos_indices': pos_indices,
+                            'polar_indices': polar_indices,
+                            'position_indices': [position_indices],
+                            'aspect_indices': [aspect_indices],
+                            'left_aspect_right_indices': [(left_indices, aspect_indices, right_indices)],
+                            'aspect_boundary': [aspect_boundary],
+                            'polarity': [polarity],
+                        }
+
+
                 else:
-                    # 一句话里可能有多个属性
-                    all_data[context] = {
-                        'text_indices': [text_indices],
-                        'context_indices': context_indices,
-                        'context_len': context_len,
-                        'pos_indices': pos_indices,
-                        'polar_indices': polar_indices,
-                        'position_indices': [position_indices],
-                        'aspect_indices': [aspect_indices],
-                        'left_aspect_right_indices': [(left_indices, aspect_indices, right_indices)],
-                        'aspect_boundary': [aspect_boundary],
-                        'polarity': [polarity],
-                    }
-
-            self.build_dataset(all_data)
-            if write_file:
-                self.write_formarted_datafile(all_data)
-
-            pickle.dump({'data': self.data,
-                         'all_data': self.all_data},
-                        open(dat_fname, 'wb'))
-        self.statistic(self.all_data)
-
-    def build_dataset(self, all_data):
+                    break
         self.all_data = all_data
+
+    def build_dataset(self):
+        all_data = self.all_data
         combine = self.combine
         max_seq_len = self.tokenizer.max_seq_len
         pad_token_idx = self.tokenizer.word2idx[PAD_TOKEN]
@@ -403,21 +437,44 @@ class ABSADataset(Dataset):
                     data_item['aspect_boundary'] = val['aspect_boundary'][i]
                     self.data.append(data_item)
 
-    def write_formarted_datafile(self, data):
+    def load_dataset(self):
+        print('loading absa_dataset:{}'.format(self.dat_fname))
+        datas = pickle.load(open(self.dat_fname, 'rb'))
+        self.data = datas['data']
+        self.all_data = datas['all_data']
+        self.statistic_data = datas['statistic']
+
+    def save_dataset(self):
+        datas = {
+            'data': self.data,
+            'all_data': self.all_data,
+            'statistic': self.statistic_data
+        }
+        pickle.dump(datas, open(self.dat_fname, 'wb'))
+
+    def write_formarted_datafile(self):
+        data = self.all_data
         tokenizer = self.tokenizer
-        with open('state/formated_datafile.txt', 'w', encoding='utf8') as f:
+        new_file = 'state/formated_{}.txt'.format(self.dataset_name)
+        print('writing {}……'.format(new_file))
+
+        with open(new_file, 'w', encoding='utf8') as f:
             for x, y in data.items():
                 content_len = y['context_len']
-                f.write(tokenizer.sequence_to_text(y['context_indices'][:content_len], tokenizer.idx2word) + '\n')
-                f.write(tokenizer.sequence_to_text(y['pos_indices'][:content_len], tokenizer.idx2pos) + '\n')
-                f.write(tokenizer.sequence_to_text(y['polar_indices'][:content_len], tokenizer.idx2polar) + '\n')
+                context = tokenizer.sequence_to_text(y['context_indices'][:content_len], tokenizer.idx2word)
+                pos = tokenizer.sequence_to_text(y['pos_indices'][:content_len], tokenizer.idx2pos)
+                polar = tokenizer.sequence_to_text(y['polar_indices'][:content_len], tokenizer.idx2polar)
+                ct_pos_polar = '\n'.join([context, pos, polar, '\n'])
+
                 t = ''
                 for i in range(len(y['polarity'])):
                     sidx, eidx = y['aspect_boundary'][i][0], y['aspect_boundary'][i][1]
                     aspect = ' '.join(x.split()[sidx:eidx + 1])
                     polarity = y["polarity"][i]
-                    t += aspect + ' ' + str(sidx) + ',' + str(eidx) + ' ' + str(polarity) + '\t'
+                    t += "{} {},{} {}\t".format(aspect, sidx, eidx, polarity)
+
                 t += str(content_len - 1)
+                f.write(ct_pos_polar)
                 f.write(t + '\n' * 2)
 
         with open('state/formated_datafile.txt', 'w', encoding='utf8') as f:
@@ -439,7 +496,7 @@ class ABSADataset(Dataset):
                 t += str(content_len - 1)
                 f.write(t + '\n' * 2)
 
-    def statistic(self, data):
+    def statistic(self):
         '''
         all_data[context] = {
                         'text_indices': [np.array],
@@ -456,6 +513,8 @@ class ABSADataset(Dataset):
         '''
 
         tokenizer = self.tokenizer
+        data = self.all_data
+
         sentences = 0
         aspects = set()
         polar_count = {}.fromkeys(tokenizer.polar2idx.keys(), 0)
@@ -471,14 +530,9 @@ class ABSADataset(Dataset):
 
             sentences += 1
 
-        print('dataset:[{}] \nsentences:{} aspects:{} polars:[{}]\n'.format(
-            self.dataset_name, sentences, len(aspects), polar_count))
-        statistics = {
-            'sentences': sentences,
-            "aspect": aspects,
-            "polar_count": polar_count
-        }
-        pickle.dump(statistics, open('state/statistic_{}.pkl'.format(self.dataset_name), 'wb'))
+        self.statistic_data['sentences'] = sentences
+        self.statistic_data['aspect'] = aspects
+        self.statistic_data['polar_count'] = polar_count
 
     def __getitem__(self, index):
         return self.data[index]
@@ -489,7 +543,7 @@ class ABSADataset(Dataset):
 
 if __name__ == '__main__':
     # test()
-    tokenizer = build_tokenizer(fnames='data/semeval14', max_seq_len=85)
+    tokenizer = build_tokenizer(max_seq_len=MAX_SEQ_LEN)
     ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
     ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
     ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)

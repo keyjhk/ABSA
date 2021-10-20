@@ -146,8 +146,7 @@ class Test(nn.Module):
         polar = squeeze_embedding(polar, len_x.cpu())
         # sp
         polar = torch.cat((polar, position), dim=-1)
-        polar, _ = self.attention_p(k=polar, q=polar)
-        polar = torch.tanh(polar)
+        polar, _ = torch.tanh(self.attention_p(k=polar, q=polar)[0])
         hp = torch.cat((encoder_out, polar), dim=-1)
         _, scores = self.attention_hp(hp)
         sp = torch.bmm(scores, encoder_out).squeeze(1)  # batch,hidden_size
