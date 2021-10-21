@@ -59,7 +59,7 @@ class SentiWordNet:
             'dict': 'data/SentiWordNet_3.0.0.txt',
             'save': 'state/sentiwordnet.pkl'
         }
-
+        #
         self.senti_dict = {}
         self.load_dict()
 
@@ -253,6 +253,10 @@ class Tokenizer(object):
                 pos = 'v'
             elif x[1].startswith('JJ'):
                 pos = 'a'
+            elif x[1].startswith('NN'):
+                pos = 'n'
+            elif x[1].startswith('RB'):
+                pos = 'r'
             else:
                 pos = 'o'
 
@@ -572,10 +576,10 @@ if __name__ == '__main__':
     tokenizer = build_tokenizer(max_seq_len=MAX_SEQ_LEN)
     # build_embedding_matrix(tokenizer.word2idx)
     # labeled
-    # ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
-    # ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
-    # ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
-    # ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
+    ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
+    ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
+    ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
+    ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
     # unlabeled
     ABSADataset(fname='data/unlabeled/formated_electronic.txt', tokenizer=tokenizer)
     ABSADataset(fname='data/unlabeled/formated_yelp_review.txt', tokenizer=tokenizer)

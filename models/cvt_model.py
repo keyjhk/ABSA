@@ -11,6 +11,7 @@ class CVTModel(nn.Module):
                  num_polar,
                  num_position,
                  pretrained_embedding,
+                 tokenizer,
                  mode='labeled',
                  ### parameters for model ###
                  word_embedding_size=300,
@@ -18,13 +19,10 @@ class CVTModel(nn.Module):
                  polar_embedding_size=50,
                  position_embedding_size=50,
                  encoder_hidden_size=300,
-                 combine='cvt'
                  ):
 
         super().__init__()
 
-        # model name
-        self.name = combine
         # inputs cols: 和 forward所传参数顺序一致
         self.inputs_cols = [
             'context_indices', 'pos_indices', 'polar_indices',
@@ -35,6 +33,7 @@ class CVTModel(nn.Module):
         ]
 
         self.mode = mode
+        self.tokenizer = tokenizer
         # embedding for word/pos/polar
         self.word_embedding = nn.Embedding.from_pretrained(
             torch.tensor(pretrained_embedding, dtype=torch.float))
@@ -42,23 +41,18 @@ class CVTModel(nn.Module):
         self.polar_embedding = nn.Embedding(num_polar, polar_embedding_size)
         self.position_embedding = nn.Embedding(num_position + 1, position_embedding_size)
 
-        if self.name == 'cvt-at-position':
-            # self.encoder = EncoderPosition(word_embedding_size,
-            #                                position_embedding_size,
-            #                                encoder_hidden_size)
-            # self.primary = PrimayPosition(hidden_dim=encoder_hidden_size * 2,
-            #                         word_embed_dim=word_embedding_size,
-            #                         position_dim=position_embedding_size,
-            #                         num_polar=num_polar)
-            self.encoder = Test1(word_embed_dim=word_embedding_size,
-                                position_embed_dim=position_embedding_size,
-                                polar_embed_dim=polar_embedding_size,
-                                hidden_dim=encoder_hidden_size,
-                                num_polar=num_polar)
+        # encoder
+        self.encoder = Test1(word_embed_dim=word_embedding_size,
+                             position_embed_dim=position_embedding_size,
+                             polar_embed_dim=polar_embedding_size,
+                             hidden_dim=encoder_hidden_size,
+                             num_polar=num_polar)
+        # location decoder
+        self.location_decoder = LocationDecoder(self.word_embedding,
+                                                encoder_hidden_size,
+                                                tokenizer=tokenizer)
 
-        elif self.name == 'atae':
-            self.encoder = atae_lstm.ATAE_LSTM(num_polar, self.word_embedding, encoder_hidden_size)
-            self.primary = None
+        self.name = self.encoder.name
 
         # loss
         self.loss = nn.CrossEntropyLoss()
@@ -74,6 +68,7 @@ class CVTModel(nn.Module):
     def forward(self, *inputs,
                 mode='labeled'):
 
+        # meta data
         context = inputs[self.inputs_cols.index('context_indices')]  # batch,MAX_LEN
         pos = inputs[self.inputs_cols.index('pos_indices')]  # batch,MAX_LEN
         polar = inputs[self.inputs_cols.index('polar_indices')]  # batch,MAX_LEN
@@ -84,24 +79,32 @@ class CVTModel(nn.Module):
         target = inputs[self.inputs_cols.index('target')]  # batch
         len_x = inputs[self.inputs_cols.index('len_s')]  # batch
 
-        # pool(average) aspect
-        aspect_pool = self.pool_aspect(aspect_indices, aspect_boundary)
         # word/polar/pos/position # batch,MAX_LEN,word_embed_dim
         word = self.word_embedding(context)  # batch,MAX_LEN,word_embed_dim
         pos = self.pos_embedding(pos)  # batch,MAX_LEN,pos_embed_dim
         polar = self.polar_embedding(polar)  # batch,MAX_LEN,polar_embed_dim
         position = self.position_embedding(position_indices)  # batch,MAX_LEN,position_embed_dim
+        # squeeze
+        word = squeeze_embedding(word, len_x)
+        pos = squeeze_embedding(pos, len_x)
+        polar = squeeze_embedding(polar, len_x)
+        position = squeeze_embedding(position, len_x)
 
+        # pool(average) aspect
+        aspect_pool = self.pool_aspect(aspect_indices, aspect_boundary)
+
+        loss = 0
         if mode == "labeled":  # 监督训练
             # self._unfreeze_model()
-            if self.name.startswith('cvt'):
-                # encoder_out = self.encoder(word, position, len_x)  # get encoder out
-                out = self.encoder(word, position, polar, aspect_pool, len_x)
-                # out = self.primary(word_out, position, polar_out, aspect_pool, len_x)
-            elif self.name == 'atae':
-                out = self.encoder(context, aspect_pool, len_x)  # resume atae
-
-            loss = self.loss(out, target)
+            out,encoder_out,last_hidden = self.encoder(word, position, polar, aspect_pool, len_x)
+            loss += self.loss(out, target)
+            # location loss
+            locations = self.location_decoder(encoder_out,
+                                              last_hidden,
+                                              context) # batch,2,seq_len
+            loss += (self.loss(locations[:,0,:],aspect_boundary[:,0]) +
+                     self.loss(locations[:, 1, :], aspect_boundary[:, 1])
+                     )
             return loss, out
         elif mode == "unlabeled":  # 无监督训练
             pass

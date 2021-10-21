@@ -2,8 +2,49 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
 from layers.attention import Attention, squeeze_embedding, NoQueryAttention
-from layers.laynorm import LayerNorm
-from layers.squeeze import SqueezeEmbedding, DynamicLSTM
+from data_utils import SOS_TOKEN
+
+
+class LocationDecoder(nn.Module):
+    def __init__(self,
+                 word_embedding,
+                 hidden_dim,
+                 tokenizer):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.word_embedding = word_embedding
+        self.l = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.decoder = nn.GRU(word_embedding.embedding_dim,
+                              hidden_dim,batch_first=True)
+
+    def forward(self, encoder_out, last_hidden, context_indices):
+        # encoder: batch,seq_len,hidden_size*2 ;
+        # context_indices : batch,MAX_LEN
+        # last_hidden: 2(directions),batch,hidden_size
+        mb = encoder_out.shape[0]
+        device = encoder_out.device
+        sos_idx = self.tokenizer.word2idx[SOS_TOKEN]
+        sos = torch.tensor([sos_idx] * mb,device=device).view(-1, 1)  # batch,1
+        sos = self.word_embedding(sos)  # batch,1,word_dim
+        # last_hidden from encoder, add forward/backward
+        last_hidden = last_hidden[0] + last_hidden[1]  # batch,hidden
+        last_hidden = last_hidden.unsqueeze(0)  # 1, batch,hidden_size
+        decoder_out = sos  # first time step
+        locations = []
+        # encoder
+        # encoder_out = torch.tanh(self.l(encoder_out))  # batch,seq_len,hidden_size
+        encoder_out = self.l(encoder_out) # batch,seq_len,hidden_size
+        for i in range(2):  # sos,as,ae
+            # decoder_out: batch,1,hidden_size ; last_hidden: 1,batch,hidden_size
+            decoder_out, last_hidden = self.decoder(decoder_out, last_hidden)
+            location = torch.bmm(decoder_out, encoder_out.transpose(1, 2))  # batch,1,seq_len
+            location = torch.softmax(location.squeeze(1), dim=-1)  # batch,seq_len
+            locations.append(location)  # probability
+            # max prob location
+            predict_location = torch.argmax(location, dim=-1, keepdim=True)  # batch,1 ;1 means index
+            decoder_out = torch.gather(context_indices, 1, predict_location)  # batch,1 ;posiiton in context
+            decoder_out = self.word_embedding(decoder_out)  # batch,1,word_dim
+        return torch.stack(locations,dim=1)  # batch,2,seq_len
 
 
 class EncoderPosition(nn.Module):
@@ -184,7 +225,7 @@ class Test1(nn.Module):
                  num_polar
                  ):
         super().__init__()
-
+        self.name = 'test1'
         # atrribute
         self.hidden_size = hidden_dim
         # gru
@@ -223,8 +264,7 @@ class Test1(nn.Module):
         # decoder
         # squeeze
         max_x = len_x.max()
-        position = squeeze_embedding(position, len_x.cpu())
-        polar = squeeze_embedding(polar, len_x.cpu())
+
         # sp
         # polar = torch.cat((polar,position),dim=-1)
         # polar, _ = self.attention_p(k=polar, q=polar)
@@ -243,7 +283,7 @@ class Test1(nn.Module):
         s = torch.cat((s_max, sa), dim=-1)
 
         out = self.dense(s)
-        return out  # batch,num_polar
+        return out,encoder_out,hidden  # batch,num_polar
 
 
 class Test2(nn.Module):

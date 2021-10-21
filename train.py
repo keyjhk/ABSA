@@ -12,32 +12,38 @@ from models.cvt_model import CVTModel
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 PRINT_EVERY = 1  # how many epoches
-STEP_EVERY = 0.1 # 0<x<1 ,percent in labeled data
+STEP_EVERY = 0.1  # 0<x<1 ,percent in labeled data
+
+# model_name for save/load
+SAVE_MODEL_NAME = '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl'
+# dataset
+DATASETS = {
+    'restaurant': {
+        'train': 'data/semeval14/Restaurants_Train.xml.seg',
+        'test': 'data/semeval14/Restaurants_Test_Gold.xml.seg',
+        'unlabeled': 'data/unlabeled/formated_yelp_review.txt'
+    },
+    'laptop': {
+        'train': 'data/semeval14/Laptops_Train.xml.seg',
+        'test': 'data/semeval14/Laptops_Test_Gold.xml.seg',
+        'unlabeled': 'data/unlabeled/formated_electronic.txt'
+    }
+}
+
 
 class Instructor:
     def __init__(self, batch_size=16, max_seq_len=85, valid_ratio=0,
-                 mode='alsc', dataset='laptop', model='atae', semi_supervised=False):
+                 dataset='laptop', semi_supervised=False):
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.semi_supervised = semi_supervised
         # train parameters
         self.device = DEVICE
         self.start_epoch = 0
-        self.print_every = PRINT_EVERY
-        self.mode = mode
+        self.max_val_acc = 0
+        self.max_val_f1 = 0
         # dataset/dataloader
-        self.dataset_files = {
-            'restaurant': {
-                'train': 'data/semeval14/Restaurants_Train.xml.seg',
-                'test': 'data/semeval14/Restaurants_Test_Gold.xml.seg',
-                'unlabeled': 'data/unlabeled/formated_yelp_review.txt'
-            },
-            'laptop': {
-                'train': 'data/semeval14/Laptops_Train.xml.seg',
-                'test': 'data/semeval14/Laptops_Test_Gold.xml.seg',
-                'unlabeled': 'data/unlabeled/formated_electronic.txt'
-            }
-        }
+        self.dataset_files = DATASETS
         self.datasetname = dataset
         self.valid_ratio = valid_ratio
         self.trainset, self.validset, self.testset = None, None, None
@@ -47,9 +53,9 @@ class Instructor:
         self.pretrain_embedding = None
         # model
         self.model = None
-        self.model_name = model
         self.inputs_cols = None
         self.best_model = None
+        self.model_name = None
         # init
         self.init_dataset()
         self.init_model()
@@ -98,15 +104,16 @@ class Instructor:
                               num_polar=len(tokenizer.polar2idx),
                               num_position=tokenizer.max_seq_len,
                               pretrained_embedding=self.pretrain_embedding,
-                              combine=self.model_name,
+                              tokenizer= tokenizer
                               ).to(self.device)
+        self.model_name = self.model.name
         self.inputs_cols = self.model.inputs_cols
         self._reset_params()
 
     def _reset_params(self):
         for name, p in self.model.named_parameters():
             if 'embed' in name:
-                print('skip parameter: {}'.format(name))
+                print('skip reset parameter: {}'.format(name))
                 continue
             if p.requires_grad:
                 if len(p.shape) > 1:
@@ -115,16 +122,16 @@ class Instructor:
                     stdv = 1. / math.sqrt(p.shape[0])
                     torch.nn.init.uniform_(p, a=-stdv, b=stdv)
 
-            # print('=' * 30)
+        print('=' * 30)
 
     def set_logger(self):
         logger = logging.getLogger()
         logger.setLevel(logging.INFO)
 
         Format = '%(asctime)s - %(levelname)s: %(message)s'
-        logger_file = 'logger_{}_{}_{}.log'.format(self.datasetname, self.model_name,
-                                                   strftime("%m%d-%H%M", localtime()))
-        logger_file = 'state/' + logger_file
+        logger_file = '{}_{}_{}.log'.format(self.datasetname, self.model_name,
+                                            strftime("%m%d-%H%M", localtime()))
+        logger_file = 'state/log/' + logger_file
         file_hander = logging.FileHandler(logger_file, mode='w', encoding='utf8')
         file_hander.setFormatter(logging.Formatter(Format))
 
@@ -168,23 +175,30 @@ class Instructor:
             'acc': acc,
             'f1': f1,
         }
-        fname = '{}_epoch{}_acc_{:.2f}_f1_{:.2f}_{}.pkl'.format(self.model_name,
-                                                                epoch, acc, f1,
-                                                                self.datasetname)
+        fname = SAVE_MODEL_NAME.format(model=self.model_name, epoch=epoch,
+                                       acc=acc, f1=f1,
+                                       dataset=self.datasetname)
+
         self.best_model = fname
         torch.save(states, open('state/' + fname, 'wb'))
 
     def load(self):
-        model_pattern = r'{}_epoch\w+'.format(self.model_name)
+        # '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl'
+        model_pattern = r'{}_{}_epoch.+'.format(self.datasetname, self.model_name)
         model_cpt = list(filter(lambda x: re.match(model_pattern, x),
                                 os.listdir('state')))
-        model_cpt.sort(key=lambda x: float(x.split('_')[3]))  # sorted by acc
+        # sorted by acc
+        model_cpt.sort(key=lambda x: float(re.match(r'.+acc_(.+?)_.+', x).group(1)))
 
         if len(model_cpt) > 0:
             best_model_name = model_cpt[-1]
-            self.logger.info('best_model_name:{}'.format(best_model_name))
+            self.logger.info('load best_model_name:{}'.format(best_model_name))
             model_cpt = torch.load(open('state/' + best_model_name, 'rb'))
-            self.start_epoch = model_cpt['epoch'] + 1
+            # max
+            self.start_epoch = model_cpt['epoch']
+            self.max_val_f1 = model_cpt['f1']
+            self.max_val_acc = model_cpt['acc']
+            # model/opt
             self.model.load_state_dict(model_cpt['model'])
             self.optimizer.load_state_dict(model_cpt['optimizer'])
 
@@ -203,12 +217,13 @@ class Instructor:
         self.logger.info('loss:{:.4f} acc:{:.2f}% f1:{:2f}'.format(loss, acc, f1))
 
     def run(self):
-        max_val_acc = 0
-        max_val_f1 = 0
+        max_val_acc = self.max_val_acc
+        max_val_f1 = self.max_val_f1
         max_val_epoch = self.start_epoch
+        epoch = self.start_epoch
 
         label_steps = self.mixloader.label_len  # how many iters in the labeled dataset
-        train_steps = int(STEP_EVERY*label_steps)  # how many steps then calculate the train acc/loss
+        train_steps = int(STEP_EVERY * label_steps)  # how many steps then calculate the train acc/loss
         n_correct, n_total, loss_total = 0, 0, 0
         for step, (batch, mode) in enumerate(self.mixloader.alternating_batch(), start=1):
             self.model.train()
@@ -220,7 +235,6 @@ class Instructor:
 
             # progress
             _step = step // 2 if self.semi_supervised else step  # alternative
-            epoch = _step // label_steps  # approximately
             # loss,acc on train , 1 step 1 show
             percent = 100 * (_step % label_steps) / label_steps
             targets = batch['target'].to(self.device)
@@ -228,15 +242,18 @@ class Instructor:
             n_total += len(out)
             loss_total += loss.item()
 
+            if _step % label_steps == 0:
+                epoch += 1
+
             if _step % train_steps == 0:
                 train_acc = 100 * n_correct / n_total
-                train_loss = loss_total/train_steps
+                train_loss = loss_total / train_steps
                 n_correct, n_total, loss_total = 0, 0, 0
                 print('percent:{:.2f}%, loss:{:.4f}, acc:{:.2f}%'.format(percent, train_loss, train_acc))
                 print('-' * 30)
 
             # evaluate in valid
-            if _step % (self.print_every*label_steps) ==0:
+            if _step % (PRINT_EVERY * label_steps) == 0:
                 acc, f1, loss = self._evaluate_acc_f1(self.validloader)
                 info = 'epoch:{} loss:{:.4f} acc:{:.2f}% f1:{:2f} '.format(epoch, loss, acc, f1)
                 print('=' * 30,
@@ -254,7 +271,6 @@ class Instructor:
 
             if epoch - max_val_epoch > 5:
                 self.logger.info('early stop')
-                print('early stop')
                 break
 
         self.load()
@@ -262,7 +278,7 @@ class Instructor:
 
 
 if __name__ == '__main__':
-    instrutor = Instructor(dataset='restaurant',model='cvt-at-position')
+    instrutor = Instructor(dataset='restaurant')
     # instrutor = Instructor(dataset='laptop', model='cvt-at-position')
     instrutor.run()
     # instrutor.eval()
