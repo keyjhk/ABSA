@@ -63,8 +63,8 @@ class Instructor:
         self.init_model()
         self.loss = nn.CrossEntropyLoss()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
-        # self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=1e-2)  # weight_decay=0.01
-        self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=1e-3)  # weight_decay=0.01
+        self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=1e-2)  # weight_decay=0.01
+        # self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=5e-3)  # 1e-3 for weight of semi-supervised
         # logger
         self.logger = self.set_logger()
 
@@ -234,8 +234,8 @@ class Instructor:
         for batch, mode in self.mixloader.alternating_batch():
             if mode == 'unlabeled':
                 pass
-                if random() < unlabel_mode_ratio(epoch):
-                    continue  # skip unlabeled data
+                # if random() < unlabel_mode_ratio(epoch):
+                #     continue  # skip unlabeled data
                 # self.logger.info('trigger unlabeled epoch:{} ratio:{}'.format(epoch,unlabel_mode_ratio(epoch)))
             else:
                 step += 1

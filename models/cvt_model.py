@@ -19,7 +19,7 @@ class CVTModel(nn.Module):
                  pos_embedding_size=50,
                  polar_embedding_size=50,
                  position_embedding_size=50,  # 50 100 300
-                 encoder_hidden_size=150  # 150 200 300
+                 encoder_hidden_size=200  # 150 200 300
                  ):
 
         super().__init__()
@@ -65,14 +65,20 @@ class CVTModel(nn.Module):
         self.primary = BilayerPrimary(word_embed_dim=word_embedding_size,
                                       hidden_dim=encoder_hidden_size,
                                       num_polar=num_polar)
+        # auxiliary
+        # full
+        self.primary_full = BilayerPrimary(word_embed_dim=word_embedding_size,
+                                      hidden_dim=encoder_hidden_size,
+                                      num_polar=num_polar)
 
+        # uni
         self.primary_uni = BilayerPrimary(word_embed_dim=word_embedding_size,
                                           hidden_dim=encoder_hidden_size,
                                           num_polar=num_polar)
-
+        # mask
         self.primary_mask = BilayerPrimary(word_embed_dim=word_embedding_size,
-                                          hidden_dim=encoder_hidden_size,
-                                          num_polar=num_polar)
+                                           hidden_dim=encoder_hidden_size,
+                                           num_polar=num_polar)
 
         # location decoder
         self.location_decoder = LocationDecoder(self.word_embedding,
@@ -93,28 +99,6 @@ class CVTModel(nn.Module):
         return aspect_pool
 
     def dynamic_mask(self, features, position_indices, len_x, threshold=4, ratio=1):
-        '''
-        - dynamic:
-            res: 80.38
-            lap: acc:73.17% f1:68.946691
-
-            no-smaxd
-            res: acc:79.24% f1:67.657187
-            lap: loss:0.6994 acc:72.54% f1:67.319985
-        + dynamic:
-            res: acc:79.49% f1:68.550891
-            lap: acc:71.77% f1:66.841653
-
-            no-smax:
-            res: acc:78.91% f1:68.136630
-            lap:  acc:64.34% f1:53.801563
-        :param features:
-        :param position_indices:
-        :param len_x:
-        :param threshold:
-        :param ratio:
-        :return:
-        '''
         # features: batch,seq_len,hidden_size
         # position: batch,MAX_LEN  ; len_x: batch
         # a vision radium of a sentence
@@ -168,9 +152,7 @@ class CVTModel(nn.Module):
         encoder_out, uni_out = self.encoder(word, position, len_x)
         loss = 0
         if mode == "labeled":  # 监督训练
-            # self._unfreeze_model()
-            # out, encoder_out, last_hidden = self.encoder(word, position, polar, pos, aspect_pool, len_x)
-            #
+            self._unfreeze_model()
             # loss += self.alpha * self.loss(out, target)
             # location loss
             # locations = self.location_decoder(encoder_out,
@@ -183,22 +165,31 @@ class CVTModel(nn.Module):
             # out = self.primary(bi_out,aspect_pool,len_x)
             # encoder_out = self.dynamic_mask(encoder_out, position_indices, len_x)  # batch,seq_len,hidden_size
 
-            out = self.primary(encoder_out, aspect_pool, len_x)
-            loss = self.loss(out, target)
+            out = self.primary(encoder_out, aspect_pool, len_x, repr_2=uni_out)
+            loss += self.loss(out, target)
             return loss, out
         elif mode == "unlabeled":  # 无监督训练
             self._freeze_model()
-            label_primary = self.primary(encoder_out, aspect_pool, len_x)  # batch,num_polar
-            # get dynamic mask for encoder_out
+            label_primary = self.primary(encoder_out, aspect_pool, len_x,repr_2=uni_out)  # batch,num_polar
+            label_primary = label_primary.detach()
+            # auxiliary1
+            # full
+            out_full = self.primary_full(encoder_out, aspect_pool, len_x, repr_2=uni_out)
+            loss_full = self.loss(out_full,label_primary.argmax(dim=1))
+            # masked encoder
             mask_e = self.dynamic_mask(encoder_out, position_indices, len_x)  # batch,seq_len,hidden_size
-            # mask_e = encoder_out  # test
-            out_aux_uni = self.primary_uni(uni_out, aspect_pool, len_x)  # batch,num_polar
-            out_aux_me = self.primary_mask(mask_e, aspect_pool, len_x)
-                # self.loss(out_aux_me, label_primary.argmax(dim=1))
-            loss += self.loss(out_aux_uni, label_primary.argmax(dim=1)) #
+            mask_u = self.dynamic_mask(uni_out, position_indices, len_x)
+            out_mask = self.primary_mask(mask_e, aspect_pool, len_x)  # batch,num_polar
+            loss_mask = self.loss(out_mask, label_primary.argmax(dim=1))  #
+            #  uni-encoder
+            out_uni = self.primary_uni(uni_out, aspect_pool, len_x)
+            loss_uni = self.loss(out_uni, label_primary.argmax(dim=1))
+
             # loss = F.kl_div(out_aux.log_softmax(dim=-1),
             #                 label_primary.softmax(dim=-1),
             #                 reduction='batchmean')
+
+            loss = loss_full + loss_mask + loss_uni
 
             return loss, label_primary
 

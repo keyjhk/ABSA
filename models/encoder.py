@@ -223,7 +223,7 @@ class BilayerEncoder(nn.Module):
         bi_in = torch.cat((bi_in, position), dim=-1)  # + position
         bi_out, bi_hidden = self.bi_gru(bi_in)
 
-        return bi_out,uni_out
+        return bi_out, uni_out
 
 
 class BilayerPrimary(nn.Module):
@@ -242,30 +242,32 @@ class BilayerPrimary(nn.Module):
         self.attention_hap = NoQueryAttention(word_embed_dim + hidden_dim,
                                               score_function='bi_linear')  # aspect + context
 
+        self.output_layer = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.output_layer_1 = nn.Linear(hidden_dim * 2, hidden_dim)
         self.dense = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.Dropout(p=0.5),
             nn.Tanh(),
             nn.Linear(hidden_dim, num_polar),
         )
 
-    def forward(self, encoder_out, aspect, len_x):
+    def project(self, repr, aspect, len_x):
+        # repr: batch,seq_len,hidden_size
         max_x = len_x.max()
-        # encoder_out = torch.tanh(self.e(encoder_out))
         # sa
-        hap = torch.cat((encoder_out, aspect.expand(-1, max_x, -1)),
+        hap = torch.cat((repr, aspect.expand(-1, max_x, -1)),
                         dim=-1)
         _, scores = self.attention_hap(hap)
-        sa = torch.bmm(scores, encoder_out).squeeze(1)  # batch,hidden_size
+        sa = torch.bmm(scores, repr).squeeze(1)  # batch,hidden_size
         # smax
-        s_max = torch.max(encoder_out, dim=1)[0].squeeze(1)  # batch,hidden_size
-        # hn
-        hn = encoder_out[:, -1, :]  # batch,hidden_size
-        # concat
-        # s = torch.cat((s_max, sa, hn), dim=-1)
-        s = torch.cat(( sa, hn), dim=-1)
+        s_max = torch.max(repr, dim=1)[0].squeeze(1)  # batch,hidden_size
 
-        out = self.dense(s)
+        return torch.cat((sa, s_max), dim=-1)  # batch,hidden_size*2
+
+    def forward(self, encoder_out, aspect, len_x, repr_2=None):
+        outputs = self.output_layer(self.project(encoder_out, aspect, len_x))
+        if repr_2 != None:
+            outputs += self.output_layer_1(self.project(repr_2, aspect, len_x))  # batch,hidden_size
+
+        out = self.dense(outputs)
         return out
 
 
