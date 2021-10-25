@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from models.encoder import *
 from models.primary import *
 from models import atae_lstm
@@ -17,8 +18,8 @@ class CVTModel(nn.Module):
                  word_embedding_size=300,
                  pos_embedding_size=50,
                  polar_embedding_size=50,
-                 position_embedding_size=50,
-                 encoder_hidden_size=300,
+                 position_embedding_size=50,  # 50 100 300
+                 encoder_hidden_size=150  # 150 200 300
                  ):
 
         super().__init__()
@@ -33,6 +34,7 @@ class CVTModel(nn.Module):
         ]
 
         self.mode = mode
+        self.alpha = 1  # 0.5 0.8 1
         self.tokenizer = tokenizer
         # embedding for word/pos/polar
         self.word_embedding = nn.Embedding.from_pretrained(
@@ -42,11 +44,36 @@ class CVTModel(nn.Module):
         self.position_embedding = nn.Embedding(num_position + 1, position_embedding_size)
 
         # encoder
-        self.encoder = Test1(word_embed_dim=word_embedding_size,
-                             position_embed_dim=position_embedding_size,
-                             polar_embed_dim=polar_embedding_size,
-                             hidden_dim=encoder_hidden_size,
-                             num_polar=num_polar)
+        # self.encoder = EncoderPosition(word_embed_dim=word_embedding_size,
+        #                                position_embed_dim=position_embedding_size,
+        #                                hidden_size=encoder_hidden_size,
+        #                                )
+        self.encoder = BilayerEncoder(word_embed_dim=word_embedding_size,
+                                      position_embed_dim=position_embedding_size,
+                                      hidden_size=encoder_hidden_size,
+                                      )
+
+        # test
+        # self.encoder = Test6(word_embed_dim=word_embedding_size,
+        #                     position_embed_dim=position_embedding_size,
+        #                     polar_embed_dim=polar_embedding_size,
+        #                      pos_dim=pos_embedding_size,
+        #                     hidden_dim=encoder_hidden_size,
+        #                     num_polar=num_polar)
+
+        # primary
+        self.primary = BilayerPrimary(word_embed_dim=word_embedding_size,
+                                      hidden_dim=encoder_hidden_size,
+                                      num_polar=num_polar)
+
+        self.primary_uni = BilayerPrimary(word_embed_dim=word_embedding_size,
+                                          hidden_dim=encoder_hidden_size,
+                                          num_polar=num_polar)
+
+        self.primary_mask = BilayerPrimary(word_embed_dim=word_embedding_size,
+                                          hidden_dim=encoder_hidden_size,
+                                          num_polar=num_polar)
+
         # location decoder
         self.location_decoder = LocationDecoder(self.word_embedding,
                                                 encoder_hidden_size,
@@ -64,6 +91,49 @@ class CVTModel(nn.Module):
                                 aspect_len.unsqueeze(1)).unsqueeze(1)  # batch,1,embed_dim
 
         return aspect_pool
+
+    def dynamic_mask(self, features, position_indices, len_x, threshold=4, ratio=1):
+        '''
+        - dynamic:
+            res: 80.38
+            lap: acc:73.17% f1:68.946691
+
+            no-smaxd
+            res: acc:79.24% f1:67.657187
+            lap: loss:0.6994 acc:72.54% f1:67.319985
+        + dynamic:
+            res: acc:79.49% f1:68.550891
+            lap: acc:71.77% f1:66.841653
+
+            no-smax:
+            res: acc:78.91% f1:68.136630
+            lap:  acc:64.34% f1:53.801563
+        :param features:
+        :param position_indices:
+        :param len_x:
+        :param threshold:
+        :param ratio:
+        :return:
+        '''
+        # features: batch,seq_len,hidden_size
+        # position: batch,MAX_LEN  ; len_x: batch
+        # a vision radium of a sentence
+        mb = features.shape[0]
+        device = position_indices.device
+        window_size = torch.div(len_x, 4, rounding_mode='floor').unsqueeze(1)  # batch,1 ;half of a sentence
+        threshold = torch.tensor([threshold] * mb, device=device).unsqueeze(1)  # batch,1 4
+        window_size = torch.cat((window_size, threshold), dim=-1)  # batch,2
+        window_size = window_size.min(dim=-1, keepdim=True)[0]  # batch,1
+
+        max_x = len_x.max()
+        # mask over threshoulds
+        mask_r = torch.rand(position_indices.shape, device=device)  # batch,MAX_LEN
+        mask_r = mask_r.masked_fill(mask=mask_r < ratio, value=0)  # 随机置0
+        mask_r = mask_r.masked_fill(mask=mask_r >= ratio, value=1)  # 其余置1
+        mask_r = mask_r.masked_fill(position_indices <= window_size, value=1)  # aspect
+        mask_r = mask_r[:, :max_x].unsqueeze(dim=2)
+
+        return features * mask_r  # batch,MAX_LEN,1
 
     def forward(self, *inputs,
                 mode='labeled'):
@@ -93,26 +163,44 @@ class CVTModel(nn.Module):
         # pool(average) aspect
         aspect_pool = self.pool_aspect(aspect_indices, aspect_boundary)
 
+        # uni_out,bi_out from encoder
+        # encoder_out, _ = self.encoder(word, position, len_x)
+        encoder_out, uni_out = self.encoder(word, position, len_x)
         loss = 0
         if mode == "labeled":  # 监督训练
             # self._unfreeze_model()
-            out,encoder_out,last_hidden = self.encoder(word, position, polar, aspect_pool, len_x)
-            loss += self.loss(out, target)
+            # out, encoder_out, last_hidden = self.encoder(word, position, polar, pos, aspect_pool, len_x)
+            #
+            # loss += self.alpha * self.loss(out, target)
             # location loss
-            locations = self.location_decoder(encoder_out,
-                                              last_hidden,
-                                              context) # batch,2,seq_len
-            loss += (self.loss(locations[:,0,:],aspect_boundary[:,0]) +
-                     self.loss(locations[:, 1, :], aspect_boundary[:, 1])
-                     )
+            # locations = self.location_decoder(encoder_out,
+            #                                   last_hidden,
+            #                                   context)  # batch,2,seq_len
+            # loss2 = (1 - self.alpha) * (self.loss(locations[:, 0, :], aspect_boundary[:, 0]) +
+            #                             self.loss(locations[:, 1, :], aspect_boundary[:, 1])
+            #                             )
+
+            # out = self.primary(bi_out,aspect_pool,len_x)
+            # encoder_out = self.dynamic_mask(encoder_out, position_indices, len_x)  # batch,seq_len,hidden_size
+
+            out = self.primary(encoder_out, aspect_pool, len_x)
+            loss = self.loss(out, target)
             return loss, out
         elif mode == "unlabeled":  # 无监督训练
-            pass
-            # self._freeze_model()
-            # # calculate the prediction and loss of the  auxiliary modules
-            # # loss += loss_full + loss_forwards + loss_backwards + loss_future + loss_past
-            # torch.cuda.empty_cache()  # 为什么要empty
-            # return loss
+            self._freeze_model()
+            label_primary = self.primary(encoder_out, aspect_pool, len_x)  # batch,num_polar
+            # get dynamic mask for encoder_out
+            mask_e = self.dynamic_mask(encoder_out, position_indices, len_x)  # batch,seq_len,hidden_size
+            # mask_e = encoder_out  # test
+            out_aux_uni = self.primary_uni(uni_out, aspect_pool, len_x)  # batch,num_polar
+            out_aux_me = self.primary_mask(mask_e, aspect_pool, len_x)
+                # self.loss(out_aux_me, label_primary.argmax(dim=1))
+            loss += self.loss(out_aux_uni, label_primary.argmax(dim=1)) #
+            # loss = F.kl_div(out_aux.log_softmax(dim=-1),
+            #                 label_primary.softmax(dim=-1),
+            #                 reduction='batchmean')
+
+            return loss, label_primary
 
     def _freeze_model(self):
         # freeze primary only; encoder is unfreezed

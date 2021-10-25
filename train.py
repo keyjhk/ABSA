@@ -1,5 +1,7 @@
 import re
 import logging
+from random import random
+
 import torch
 import torch.nn as nn
 import torch.optim as opt
@@ -61,7 +63,8 @@ class Instructor:
         self.init_model()
         self.loss = nn.CrossEntropyLoss()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
-        self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=0.01)  # weight_decay=0.01
+        # self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=1e-2)  # weight_decay=0.01
+        self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=1e-3)  # weight_decay=0.01
         # logger
         self.logger = self.set_logger()
 
@@ -104,7 +107,7 @@ class Instructor:
                               num_polar=len(tokenizer.polar2idx),
                               num_position=tokenizer.max_seq_len,
                               pretrained_embedding=self.pretrain_embedding,
-                              tokenizer= tokenizer
+                              tokenizer=tokenizer
                               ).to(self.device)
         self.model_name = self.model.name
         self.inputs_cols = self.model.inputs_cols
@@ -202,7 +205,7 @@ class Instructor:
             self.model.load_state_dict(model_cpt['model'])
             self.optimizer.load_state_dict(model_cpt['optimizer'])
 
-    def eval(self, times=5):
+    def eval(self, times=10):
         # in testloader
         acc, f1, loss = 0, 0, 0
         for t in range(times):
@@ -224,28 +227,38 @@ class Instructor:
 
         label_steps = self.mixloader.label_len  # how many iters in the labeled dataset
         train_steps = int(STEP_EVERY * label_steps)  # how many steps then calculate the train acc/loss
+        step = 0
         n_correct, n_total, loss_total = 0, 0, 0
-        for step, (batch, mode) in enumerate(self.mixloader.alternating_batch(), start=1):
+        unlabel_mode_ratio = lambda epoch: round(0.5 + 1 / (epoch + 1e-9), 4)  # decide use unlabelded data
+        # unlabel_mode_ratio = lambda epoch:0.5
+        for batch, mode in self.mixloader.alternating_batch():
+            if mode == 'unlabeled':
+                pass
+                if random() < unlabel_mode_ratio(epoch):
+                    continue  # skip unlabeled data
+                # self.logger.info('trigger unlabeled epoch:{} ratio:{}'.format(epoch,unlabel_mode_ratio(epoch)))
+            else:
+                step += 1
             self.model.train()
             self.optimizer.zero_grad()
             inputs = [batch[col].to(self.device) for col in self.inputs_cols]
-            loss, out = self.model(*inputs)
+            loss, out = self.model(*inputs, mode=mode)
             loss.backward()
             self.optimizer.step()
 
             # progress
-            _step = step // 2 if self.semi_supervised else step  # alternative
+            if mode == 'unlabeled': continue
             # loss,acc on train , 1 step 1 show
-            percent = 100 * (_step % label_steps) / label_steps
+            percent = 100 * (step % label_steps) / label_steps
             targets = batch['target'].to(self.device)
             n_correct += (torch.argmax(out, -1) == targets).sum().item()
             n_total += len(out)
             loss_total += loss.item()
 
-            if _step % label_steps == 0:
+            if step % label_steps == 0:
                 epoch += 1
 
-            if _step % train_steps == 0:
+            if step % train_steps == 0:
                 train_acc = 100 * n_correct / n_total
                 train_loss = loss_total / train_steps
                 n_correct, n_total, loss_total = 0, 0, 0
@@ -253,7 +266,7 @@ class Instructor:
                 print('-' * 30)
 
             # evaluate in valid
-            if _step % (PRINT_EVERY * label_steps) == 0:
+            if step % (PRINT_EVERY * label_steps) == 0:
                 acc, f1, loss = self._evaluate_acc_f1(self.validloader)
                 info = 'epoch:{} loss:{:.4f} acc:{:.2f}% f1:{:2f} '.format(epoch, loss, acc, f1)
                 print('=' * 30,
@@ -269,7 +282,7 @@ class Instructor:
                 if f1 > max_val_f1:
                     max_val_f1 = f1
 
-            if epoch - max_val_epoch > 5:
+            if epoch - max_val_epoch > 10:
                 self.logger.info('early stop')
                 break
 
@@ -278,7 +291,10 @@ class Instructor:
 
 
 if __name__ == '__main__':
-    instrutor = Instructor(dataset='restaurant')
-    # instrutor = Instructor(dataset='laptop', model='cvt-at-position')
+    # instrutor = Instructor(dataset='restaurant')
+    # instrutor = Instructor(dataset='laptop')
+
+    instrutor = Instructor(dataset='restaurant',semi_supervised=True)
+
     instrutor.run()
     # instrutor.eval()
