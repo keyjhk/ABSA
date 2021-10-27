@@ -5,6 +5,38 @@ from layers.attention import Attention, squeeze_embedding, NoQueryAttention
 from data_utils import SOS_TOKEN
 
 
+class AttentionWindow(nn.Module):
+    def __init__(self, hidden_size, wsize=4, eye=True):
+        super().__init__()
+        self.attention_w = Attention(hidden_size)
+        self.wsize = wsize
+        self.eye = eye
+
+    def window_mask(self, repr):
+        wsize = self.wsize
+        batch, seq_len, _ = repr.shape
+        device = repr.device
+        _mask = torch.ones(seq_len, seq_len)
+        u_mask = torch.triu(_mask, wsize + 1).type(torch.bool)  # under triange is zero
+        l_mask = torch.tril(_mask, -(wsize + 1)).type(torch.bool)
+        if self.eye:  # vision itself
+            mask = u_mask ^ l_mask
+        else:
+            mask = u_mask ^ l_mask ^ torch.eye(seq_len, dtype=torch.bool)
+
+        mask = mask.unsqueeze(0).expand(batch, -1, -1)  # batch,seq_len,seq_len
+
+        return mask.to(device)  # batch,seq_len,seq_len
+
+    def forward(self, repr):
+        # repr:batch,seq,hidden_size ss
+        mask = self.window_mask(repr)
+        _, scores = self.attention_w(k=repr, q=repr, mask=mask)
+        ra = torch.bmm(scores, repr)  # batch,seq,hidden_size
+
+        return repr + torch.relu(ra)
+
+
 class LocationDecoder(nn.Module):
     def __init__(self,
                  word_embedding,
@@ -207,7 +239,7 @@ class BilayerEncoder(nn.Module):
         # gru_input_size = self.word_embedding_size   # word
         self.uni_gru = nn.GRU(word_embed_dim, hidden_size,
                               batch_first=True, bidirectional=True)
-        self.bi_gru = nn.GRU(hidden_size + position_embed_dim,
+        self.bi_gru = nn.GRU(hidden_size * 2 + position_embed_dim,
                              hidden_size,
                              batch_first=True, bidirectional=True)
 
@@ -219,10 +251,54 @@ class BilayerEncoder(nn.Module):
         uni_out, uni_hidden = self.uni_gru(pad_x)  # hidden:layer*direction,batch,hidden_size
         uni_out, _ = pad_packed_sequence(uni_out, batch_first=True)  # batch,seq_len,hidden_size*2
         # uni + position
-        bi_in = uni_out[:, :, :self.hidden_size] + uni_out[:, :, self.hidden_size:]
+        # bi_in = uni_out[:, :, :self.hidden_size] + uni_out[:, :, self.hidden_size:]
+        bi_in = uni_out
         bi_in = torch.cat((bi_in, position), dim=-1)  # + position
         bi_out, bi_hidden = self.bi_gru(bi_in)
 
+        return bi_out, uni_out
+
+
+class BilayerEncoderP(nn.Module):
+
+    def __init__(self,
+                 word_embed_dim,
+                 position_embed_dim,
+                 hidden_size
+                 ):
+        super().__init__()
+        self.name = 'bilayer-encoderp'
+        # atrribute
+        self.word_embed_dim = word_embed_dim
+        self.hidden_size = hidden_size
+        # gru
+        # gru_input_size = self.word_embedding_size   # word
+        self.uni_gru = nn.GRU(word_embed_dim + position_embed_dim, hidden_size,
+                              batch_first=True, bidirectional=True)
+        self.bi_gru = nn.GRU(hidden_size * 2,
+                             hidden_size,
+                             batch_first=True, bidirectional=True)
+        self.uni_dropout = nn.Dropout(p=0.5)
+        self.bi_dropout = nn.Dropout(p=0.5)
+        # self attention
+        self.atention_window = AttentionWindow(hidden_size * 2,eye=False)
+
+    def forward(self, word, position, len_x):
+        # word/pos/polar: batch,MAX_LEN,embedding_size  ;len_x:batch
+        x = torch.cat((word, position), dim=-1)
+        # word+pos to gru
+        pad_x = pack_padded_sequence(x, len_x.cpu(), batch_first=True, enforce_sorted=False)
+        uni_out, uni_hidden = self.uni_gru(pad_x)  # hidden:layer*direction,batch,hidden_size
+        uni_out, _ = pad_packed_sequence(uni_out, batch_first=True)  # batch,seq_len,hidden_size*2
+        uni_out = self.uni_dropout(uni_out)
+        # uni + position
+        # bi_in = uni_out[:, :, :self.hidden_size] + uni_out[:, :, self.hidden_size:]
+        bi_in = uni_out
+        bi_out, bi_hidden = self.bi_gru(bi_in)  # batch,seq_len,hidden_size * 2
+        bi_out = self.bi_dropout(bi_out)
+        # bi_out, _ = self.bi_sa(k=bi_out, q=bi_out)  # batch,seq_len,hidden_size * 2
+        ua = self.atention_window(uni_out)
+        # uni_out = ua
         return bi_out, uni_out
 
 
@@ -235,23 +311,24 @@ class BilayerPrimary(nn.Module):
         super().__init__()
         # decoder
         self.name = 'bilayer-primary'
-        hidden_dim = hidden_dim * 2  # bidirection
 
         self.e = nn.Linear(hidden_dim, hidden_dim)
 
         self.attention_hap = NoQueryAttention(word_embed_dim + hidden_dim,
-                                              score_function='bi_linear')  # aspect + context
+                                              score_function='bi_linear')
 
         self.output_layer = nn.Linear(hidden_dim * 2, hidden_dim)
         self.output_layer_1 = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.attention_w = AttentionWindow(hidden_dim)
         self.dense = nn.Sequential(
             nn.Tanh(),
             nn.Linear(hidden_dim, num_polar),
         )
 
-    def project(self, repr, aspect, len_x):
+    def project(self, repr, aspect, len_x,aspect_boundary):
         # repr: batch,seq_len,hidden_size
         max_x = len_x.max()
+        # repr = self.e(repr)
         # sa
         hap = torch.cat((repr, aspect.expand(-1, max_x, -1)),
                         dim=-1)
@@ -259,11 +336,20 @@ class BilayerPrimary(nn.Module):
         sa = torch.bmm(scores, repr).squeeze(1)  # batch,hidden_size
         # smax
         s_max = torch.max(repr, dim=1)[0].squeeze(1)  # batch,hidden_size
+        # sw
+        sw = self.attention_w(repr)  # batch,seq_len,hidden_size
+        aspect_boundary = aspect_boundary[:,1] + aspect_boundary[:,0]  # batch,
+        aspect_boundary = torch.floor_divide(aspect_boundary,2) # batch
+        _sw=[]
+        for i in range(aspect_boundary.shape[0]):
+            _sw.append(sw[i,aspect_boundary[i],:]) # hidden_size
+        sw = torch.stack(_sw,dim=0)  # batch,hidden_size
+
 
         return torch.cat((sa, s_max), dim=-1)  # batch,hidden_size*2
 
-    def forward(self, encoder_out, aspect, len_x, repr_2=None):
-        outputs = self.output_layer(self.project(encoder_out, aspect, len_x))
+    def forward(self, encoder_out, aspect, len_x,aspect_boundary, repr_2=None):
+        outputs = self.output_layer(self.project(encoder_out, aspect, len_x,aspect_boundary))
         if repr_2 != None:
             outputs += self.output_layer_1(self.project(repr_2, aspect, len_x))  # batch,hidden_size
 

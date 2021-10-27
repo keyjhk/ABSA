@@ -19,7 +19,7 @@ class CVTModel(nn.Module):
                  pos_embedding_size=50,
                  polar_embedding_size=50,
                  position_embedding_size=50,  # 50 100 300
-                 encoder_hidden_size=200  # 150 200 300
+                 encoder_hidden_size=300  # 150 200 300
                  ):
 
         super().__init__()
@@ -44,14 +44,11 @@ class CVTModel(nn.Module):
         self.position_embedding = nn.Embedding(num_position + 1, position_embedding_size)
 
         # encoder
-        # self.encoder = EncoderPosition(word_embed_dim=word_embedding_size,
-        #                                position_embed_dim=position_embedding_size,
-        #                                hidden_size=encoder_hidden_size,
-        #                                )
-        self.encoder = BilayerEncoder(word_embed_dim=word_embedding_size,
-                                      position_embed_dim=position_embedding_size,
-                                      hidden_size=encoder_hidden_size,
-                                      )
+        self.encoder_hidden_size = encoder_hidden_size
+        self.encoder = BilayerEncoderP(word_embed_dim=word_embedding_size,
+                                       position_embed_dim=position_embedding_size,
+                                       hidden_size=encoder_hidden_size,
+                                       )
 
         # test
         # self.encoder = Test6(word_embed_dim=word_embedding_size,
@@ -63,22 +60,27 @@ class CVTModel(nn.Module):
 
         # primary
         self.primary = BilayerPrimary(word_embed_dim=word_embedding_size,
-                                      hidden_dim=encoder_hidden_size,
+                                      hidden_dim=encoder_hidden_size * 2,
                                       num_polar=num_polar)
         # auxiliary
         # full
         self.primary_full = BilayerPrimary(word_embed_dim=word_embedding_size,
-                                      hidden_dim=encoder_hidden_size,
-                                      num_polar=num_polar)
+                                           hidden_dim=encoder_hidden_size * 2,
+                                           num_polar=num_polar)
 
-        # uni
-        self.primary_uni = BilayerPrimary(word_embed_dim=word_embedding_size,
-                                          hidden_dim=encoder_hidden_size,
-                                          num_polar=num_polar)
         # mask
         self.primary_mask = BilayerPrimary(word_embed_dim=word_embedding_size,
-                                           hidden_dim=encoder_hidden_size,
+                                           hidden_dim=encoder_hidden_size * 2,
                                            num_polar=num_polar)
+
+        # forward
+        self.primary_forward = BilayerPrimary(word_embed_dim=word_embedding_size,
+                                              hidden_dim=encoder_hidden_size,
+                                              num_polar=num_polar)
+        # backwardd
+        self.primary_backward = BilayerPrimary(word_embed_dim=word_embedding_size,
+                                               hidden_dim=encoder_hidden_size,
+                                               num_polar=num_polar)
 
         # location decoder
         self.location_decoder = LocationDecoder(self.word_embedding,
@@ -104,8 +106,8 @@ class CVTModel(nn.Module):
         # a vision radium of a sentence
         mb = features.shape[0]
         device = position_indices.device
-        window_size = torch.div(len_x, 4, rounding_mode='floor').unsqueeze(1)  # batch,1 ;half of a sentence
-        threshold = torch.tensor([threshold] * mb, device=device).unsqueeze(1)  # batch,1 4
+        window_size = torch.floor_divide(len_x, 4).unsqueeze(1)  # batch,1 ;half of a sentence
+        threshold = torch.tensor([threshold] * mb, device=device).unsqueeze(1)  # batch,1;
         window_size = torch.cat((window_size, threshold), dim=-1)  # batch,2
         window_size = window_size.min(dim=-1, keepdim=True)[0]  # batch,1
 
@@ -162,34 +164,50 @@ class CVTModel(nn.Module):
             #                             self.loss(locations[:, 1, :], aspect_boundary[:, 1])
             #                             )
 
-            # out = self.primary(bi_out,aspect_pool,len_x)
-            # encoder_out = self.dynamic_mask(encoder_out, position_indices, len_x)  # batch,seq_len,hidden_size
+            mask_u = self.dynamic_mask(uni_out, position_indices, len_x)  # batch,seq_len,hidden_size
 
-            out = self.primary(encoder_out, aspect_pool, len_x, repr_2=uni_out)
+            # out = self.primary(uni_out, aspect_pool, len_x, repr_2=encoder_out)  # primary
+            # uni_out = uni_out[:,:,self.encoder_hidden_size:] + uni_out[:, :, :self.encoder_hidden_size]
+            # out = self.primary(uni_out, aspect_pool, len_x,aspect_boundary)  # only use uni
+            # out = self.primary(mask_u, aspect_pool, len_x)  # masked view u
+            # out = self.primary_forward(uni_out, aspect_pool, len_x)  # + uni
+            # out = self.primary_forward(uni_out[:, :, :self.encoder_hidden_size], aspect_pool, len_x)  # forward
+            out = self.primary_backward(uni_out[:, :, self.encoder_hidden_size:], aspect_pool, len_x,aspect_boundary)  # backward
             loss += self.loss(out, target)
             return loss, out
         elif mode == "unlabeled":  # 无监督训练
             self._freeze_model()
-            label_primary = self.primary(encoder_out, aspect_pool, len_x,repr_2=uni_out)  # batch,num_polar
+            label_primary = self.primary(uni_out, aspect_pool, len_x, repr_2=encoder_out)  # batch,num_polar
             label_primary = label_primary.detach()
             # auxiliary1
             # full
-            out_full = self.primary_full(encoder_out, aspect_pool, len_x, repr_2=uni_out)
-            loss_full = self.loss(out_full,label_primary.argmax(dim=1))
+            out_full = self.primary_full(uni_out, aspect_pool, len_x, repr_2=encoder_out)
+
             # masked encoder
             mask_e = self.dynamic_mask(encoder_out, position_indices, len_x)  # batch,seq_len,hidden_size
             mask_u = self.dynamic_mask(uni_out, position_indices, len_x)
-            out_mask = self.primary_mask(mask_e, aspect_pool, len_x)  # batch,num_polar
-            loss_mask = self.loss(out_mask, label_primary.argmax(dim=1))  #
-            #  uni-encoder
-            out_uni = self.primary_uni(uni_out, aspect_pool, len_x)
-            loss_uni = self.loss(out_uni, label_primary.argmax(dim=1))
+            out_mask = self.primary_mask(mask_u, aspect_pool, len_x)  # batch,num_polar
+            #  forward backward
+            out_forward = self.primary_forward(uni_out[:, :, :self.encoder_hidden_size], aspect_pool, len_x)
+            out_backward = self.primary_backward(uni_out[:, :, self.encoder_hidden_size:], aspect_pool, len_x)  # backward
+
+
+            # loss_full = self.loss(out_full, label_primary.argmax(dim=1))
+            loss_mask = self.loss(out_mask, label_primary.argmax(dim=1))
+            loss_forward = self.loss(out_forward, label_primary.argmax(dim=1))
+            loss_backward = self.loss(out_backward, label_primary.argmax(dim=1))
+            # loss  = loss_mask + loss_backward + loss_forward
+            loss  = loss_mask   # test semi-supervised is useful
 
             # loss = F.kl_div(out_aux.log_softmax(dim=-1),
             #                 label_primary.softmax(dim=-1),
             #                 reduction='batchmean')
-
-            loss = loss_full + loss_mask + loss_uni
+            # loss_full = F.kl_div(out_full.log_softmax(dim=-1),
+            #                      label_primary.softmax(dim=-1), reduction='batchmean')
+            # loss_mask = F.kl_div(out_mask.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+            # loss_forward = F.kl_div(out_forward.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+            # loss_backward = F.kl_div(out_backward.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+            # loss = loss_mask + loss_forward + loss_backward  # loss_full + loss_uni
 
             return loss, label_primary
 

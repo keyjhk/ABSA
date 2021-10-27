@@ -283,7 +283,9 @@ class Tokenizer(object):
         # nparray : MAX_LENGTH
         return pad_and_truncate(sequence, self.max_seq_len, value=self.word2idx[PAD_TOKEN])
 
-    def sequence_to_text(self, sequence, idx2char, skip_word=None):
+    def sequence_to_text(self, sequence, idx2char=None, skip_word=None):
+        if not idx2char: idx2char = self.idx2word
+        if not skip_word: skip_word = self.word2idx[PAD_TOKEN]
         return ' '.join(str(idx2char[idx]) for idx in sequence if idx != skip_word)
 
 
@@ -568,7 +570,6 @@ class MixDataLoader:
                 yield next(labeled_loader), 'labeled'
                 if self.semi_supervised:
                     yield u_batch, 'unlabeled'
-
 
 
 if __name__ == '__main__':

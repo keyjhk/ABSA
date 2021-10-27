@@ -35,10 +35,11 @@ DATASETS = {
 
 class Instructor:
     def __init__(self, batch_size=16, max_seq_len=85, valid_ratio=0,
-                 dataset='laptop', semi_supervised=False):
+                 dataset='laptop', semi_supervised=False, clear_model=True):
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.semi_supervised = semi_supervised
+        self.clear_model = clear_model
         # train parameters
         self.device = DEVICE
         self.start_epoch = 0
@@ -63,8 +64,14 @@ class Instructor:
         self.init_model()
         self.loss = nn.CrossEntropyLoss()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
-        self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=1e-2)  # weight_decay=0.01
-        # self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=5e-3)  # 1e-3 for weight of semi-supervised
+        if semi_supervised:
+            # 1e-3过拟合 5e-3 欠拟
+            self.patience = 1e5
+            self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=5e-3)  # 1e-3 for weight of semi-supervised
+        else:
+            # 1e-3过拟合 原1e-2
+            self.patience = 20
+            self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=5e-3)  # weight_decay=0.01
         # logger
         self.logger = self.set_logger()
 
@@ -178,18 +185,22 @@ class Instructor:
             'acc': acc,
             'f1': f1,
         }
-        fname = SAVE_MODEL_NAME.format(model=self.model_name, epoch=epoch,
-                                       acc=acc, f1=f1,
-                                       dataset=self.datasetname)
+        fname = SAVE_MODEL_NAME.format(dataset=self.datasetname,
+                                       model=self.model_name, epoch=epoch,
+                                       acc=acc, f1=f1
+                                       )
 
         self.best_model = fname
         torch.save(states, open('state/' + fname, 'wb'))
 
+    def get_model_cpt(self):
+        model_pattern = r'{}_{}_epoch.+'.format(self.datasetname, self.model_name)
+        return list(filter(lambda x: re.match(model_pattern, x),
+                           os.listdir('state')))
+
     def load(self):
         # '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl'
-        model_pattern = r'{}_{}_epoch.+'.format(self.datasetname, self.model_name)
-        model_cpt = list(filter(lambda x: re.match(model_pattern, x),
-                                os.listdir('state')))
+        model_cpt = self.get_model_cpt()
         # sorted by acc
         model_cpt.sort(key=lambda x: float(re.match(r'.+acc_(.+?)_.+', x).group(1)))
 
@@ -204,6 +215,16 @@ class Instructor:
             # model/opt
             self.model.load_state_dict(model_cpt['model'])
             self.optimizer.load_state_dict(model_cpt['optimizer'])
+
+    def clear(self):
+        if not self.clear_model: return
+        model_cpt = self.get_model_cpt()
+        model_cpt = [os.path.join('state', x) for x in model_cpt]
+        if model_cpt:
+            self.logger.info('=' * 30)
+            for p in model_cpt:
+                os.remove(p)
+                self.logger.info('remove {}'.format(p))
 
     def eval(self, times=10):
         # in testloader
@@ -220,6 +241,7 @@ class Instructor:
         self.logger.info('loss:{:.4f} acc:{:.2f}% f1:{:2f}'.format(loss, acc, f1))
 
     def run(self):
+        self.clear()  # clear the former model in
         max_val_acc = self.max_val_acc
         max_val_f1 = self.max_val_f1
         max_val_epoch = self.start_epoch
@@ -282,19 +304,21 @@ class Instructor:
                 if f1 > max_val_f1:
                     max_val_f1 = f1
 
-            if epoch - max_val_epoch > 10:
+            if epoch - max_val_epoch > self.patience:
                 self.logger.info('early stop')
                 break
 
         self.load()
         self.eval()
+        self.clear()
 
 
 if __name__ == '__main__':
-    # instrutor = Instructor(dataset='restaurant')
+    instrutor = Instructor(dataset='restaurant')
     # instrutor = Instructor(dataset='laptop')
 
-    instrutor = Instructor(dataset='restaurant',semi_supervised=True)
+    # instrutor = Instructor(dataset='restaurant',semi_supervised=True)
+    # instrutor = Instructor(dataset='laptop',semi_supervised=True)
 
     instrutor.run()
     # instrutor.eval()
