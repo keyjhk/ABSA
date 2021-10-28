@@ -219,10 +219,7 @@ class BiEncoder(nn.Module):
 class BilayerEncoder(nn.Module):
     '''
     第一层 word
-    第二层 pos
-    res:
-
-    lap:
+    第二层 +position
     '''
 
     def __init__(self,
@@ -281,7 +278,7 @@ class BilayerEncoderP(nn.Module):
         self.uni_dropout = nn.Dropout(p=0.5)
         self.bi_dropout = nn.Dropout(p=0.5)
         # self attention
-        self.atention_window = AttentionWindow(hidden_size * 2,eye=False)
+        self.atention_window = AttentionWindow(hidden_size * 2)
 
     def forward(self, word, position, len_x):
         # word/pos/polar: batch,MAX_LEN,embedding_size  ;len_x:batch
@@ -290,7 +287,7 @@ class BilayerEncoderP(nn.Module):
         pad_x = pack_padded_sequence(x, len_x.cpu(), batch_first=True, enforce_sorted=False)
         uni_out, uni_hidden = self.uni_gru(pad_x)  # hidden:layer*direction,batch,hidden_size
         uni_out, _ = pad_packed_sequence(uni_out, batch_first=True)  # batch,seq_len,hidden_size*2
-        uni_out = self.uni_dropout(uni_out)
+        # uni_out = self.uni_dropout(uni_out)
         # uni + position
         # bi_in = uni_out[:, :, :self.hidden_size] + uni_out[:, :, self.hidden_size:]
         bi_in = uni_out
@@ -312,20 +309,19 @@ class BilayerPrimary(nn.Module):
         # decoder
         self.name = 'bilayer-primary'
 
-        self.e = nn.Linear(hidden_dim, hidden_dim)
-
         self.attention_hap = NoQueryAttention(word_embed_dim + hidden_dim,
                                               score_function='bi_linear')
 
-        self.output_layer = nn.Linear(hidden_dim * 2, hidden_dim)
-        self.output_layer_1 = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.output_layer = nn.Linear(hidden_dim *2, hidden_dim)
+        self.output_layer1 = nn.Linear(hidden_dim *2, hidden_dim)
         self.attention_w = AttentionWindow(hidden_dim)
         self.dense = nn.Sequential(
-            nn.Tanh(),
+            nn.Dropout(p=0.5),
+            nn.Tanh(),  # tanh,relu
             nn.Linear(hidden_dim, num_polar),
         )
 
-    def project(self, repr, aspect, len_x,aspect_boundary):
+    def project(self, repr, aspect, len_x, aspect_boundary=None):
         # repr: batch,seq_len,hidden_size
         max_x = len_x.max()
         # repr = self.e(repr)
@@ -337,22 +333,20 @@ class BilayerPrimary(nn.Module):
         # smax
         s_max = torch.max(repr, dim=1)[0].squeeze(1)  # batch,hidden_size
         # sw
-        sw = self.attention_w(repr)  # batch,seq_len,hidden_size
-        aspect_boundary = aspect_boundary[:,1] + aspect_boundary[:,0]  # batch,
-        aspect_boundary = torch.floor_divide(aspect_boundary,2) # batch
-        _sw=[]
-        for i in range(aspect_boundary.shape[0]):
-            _sw.append(sw[i,aspect_boundary[i],:]) # hidden_size
-        sw = torch.stack(_sw,dim=0)  # batch,hidden_size
+        if aspect_boundary != None:
+            sw = self.attention_w(repr)  # batch,seq_len,hidden_size
+            aspect_boundary = aspect_boundary[:, 1]  # batch,the end aspect
+            _sw = []
+            for i in range(aspect_boundary.shape[0]):
+                _sw.append(sw[i, aspect_boundary[i], :])  # hidden_size
+            sw = torch.stack(_sw, dim=0)  # batch,hidden_size
 
+        return torch.cat((s_max, sa), dim=-1)  # batch,hidden_size*2
 
-        return torch.cat((sa, s_max), dim=-1)  # batch,hidden_size*2
-
-    def forward(self, encoder_out, aspect, len_x,aspect_boundary, repr_2=None):
-        outputs = self.output_layer(self.project(encoder_out, aspect, len_x,aspect_boundary))
-        if repr_2 != None:
-            outputs += self.output_layer_1(self.project(repr_2, aspect, len_x))  # batch,hidden_size
-
+    def forward(self, repr, aspect, len_x, aspect_boundary=None,repr2=None):
+        outputs = self.output_layer(self.project(repr, aspect, len_x, aspect_boundary))
+        if repr2 is not None:
+            outputs += self.output_layer1(self.project(repr2, aspect, len_x, aspect_boundary))
         out = self.dense(outputs)
         return out
 

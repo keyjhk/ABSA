@@ -34,7 +34,7 @@ DATASETS = {
 
 
 class Instructor:
-    def __init__(self, batch_size=16, max_seq_len=85, valid_ratio=0,
+    def __init__(self, batch_size=32, max_seq_len=85, valid_ratio=0,
                  dataset='laptop', semi_supervised=False, clear_model=True):
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
@@ -49,7 +49,7 @@ class Instructor:
         self.dataset_files = DATASETS
         self.datasetname = dataset
         self.valid_ratio = valid_ratio
-        self.trainset, self.validset, self.testset = None, None, None
+        self.trainset, self.validset, self.testset, self.unlabeledset = None, None, None, None
         self.trainloader, self.validloader, self.testloader = None, None, None
         self.mixloader = None
         self.tokenizer = None
@@ -66,17 +66,26 @@ class Instructor:
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
         if semi_supervised:
             # 1e-3过拟合 5e-3 欠拟
-            self.patience = 1e5
+            self.patience = 30
             self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=5e-3)  # 1e-3 for weight of semi-supervised
         else:
             # 1e-3过拟合 原1e-2
-            self.patience = 20
-            self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=5e-3)  # weight_decay=0.01
+            self.patience = 10
+            self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=1e-2)  # weight_decay=0.01
         # logger
         self.logger = self.set_logger()
 
-        # load
-        self.load()
+        self.clear()  # clear
+        self.load()  # load
+        self.tip()
+
+    def tip(self):
+        self.logger.info('[dataset:{} semisupervised:{}]'.format(self.datasetname, self.semi_supervised))
+
+        dataset_info = 'init dataset:\ntrain:{} valid:{} unlabeled:{} test:{}'.format(
+            len(self.trainset), len(self.validset), len(self.unlabeledset), len(self.testset)
+        )
+        self.logger.info(dataset_info)
 
     def init_dataset(self):
         max_seq_len = self.max_seq_len
@@ -92,7 +101,8 @@ class Instructor:
         unlabel_fname = self.dataset_files[self.datasetname]['unlabeled']
         trainset = ABSADataset(fname=train_fname, tokenizer=tokenizer)
         testset = ABSADataset(fname=test_fname, tokenizer=tokenizer)
-        unlabelset = ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
+        # unlabelset = ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
+        unlabelset = trainset  # test speed train
 
         if valid_ratio > 0:
             valset_len = int(len(trainset) * valid_ratio)
@@ -100,6 +110,18 @@ class Instructor:
         else:
             validset = testset
 
+        if self.semi_supervised:
+            unlabel_ratio = 0.5
+            unlabel_len = int(len(trainset) * unlabel_ratio)
+            trainset, unlabelset = random_split(trainset, [len(trainset) - unlabel_len, unlabel_len])
+
+        # dataset
+        self.trainset = trainset
+        self.validset = validset
+        self.testset = testset
+        self.unlabeledset = unlabelset
+
+        # dataloader
         self.trainloader = DataLoader(dataset=trainset, batch_size=batch_size, shuffle=True)
         self.validloader = DataLoader(dataset=validset, batch_size=batch_size, shuffle=True)
         self.testloader = DataLoader(dataset=testset, batch_size=batch_size, shuffle=True)
@@ -121,6 +143,8 @@ class Instructor:
         self._reset_params()
 
     def _reset_params(self):
+        print('=' * 30)
+        print('reset params:')
         for name, p in self.model.named_parameters():
             if 'embed' in name:
                 print('skip reset parameter: {}'.format(name))
@@ -242,6 +266,7 @@ class Instructor:
 
     def run(self):
         self.clear()  # clear the former model in
+        print('=' * 30)
         max_val_acc = self.max_val_acc
         max_val_f1 = self.max_val_f1
         max_val_epoch = self.start_epoch
@@ -251,8 +276,7 @@ class Instructor:
         train_steps = int(STEP_EVERY * label_steps)  # how many steps then calculate the train acc/loss
         step = 0
         n_correct, n_total, loss_total = 0, 0, 0
-        unlabel_mode_ratio = lambda epoch: round(0.5 + 1 / (epoch + 1e-9), 4)  # decide use unlabelded data
-        # unlabel_mode_ratio = lambda epoch:0.5
+        unlabel_mode_ratio = lambda epoch: round(0.5 + 1 / (epoch + 1e-9), 1)  # decide use unlabelded data
         for batch, mode in self.mixloader.alternating_batch():
             if mode == 'unlabeled':
                 pass
@@ -310,7 +334,6 @@ class Instructor:
 
         self.load()
         self.eval()
-        self.clear()
 
 
 if __name__ == '__main__':

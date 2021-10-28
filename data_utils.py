@@ -1,9 +1,12 @@
-import os, math, pickle
+import os, math, random
+import pickle
 import re
 import string
 
 import nltk
 import numpy as np
+import torch
+import torch.nn.functional as F
 
 import unicodedata
 from torch.utils.data import Dataset
@@ -21,6 +24,10 @@ LABELED_FILES = [
     'data/semeval14/Restaurants_Train.xml.seg',
 ]
 
+TRAIN_FILES = ['data/semeval14/Laptops_Train.xml.seg',
+               'data/semeval14/Restaurants_Train.xml.seg',
+               ]
+
 UNLABELED_FILES = [
     'data/unlabeled/formated_electronic.txt',
     'data/unlabeled/formated_yelp_review.txt',
@@ -31,6 +38,7 @@ GLOVE_FILE = 'data/glove.42B.300d.txt'
 
 # max seq len
 MAX_SEQ_LEN = 85
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # token
 UNK_TOKEN = "<UNK>"
@@ -172,6 +180,25 @@ def build_embedding_matrix(word2idx, embed_dim=300, dat_fname='state/embedding_m
     return embedding_matrix
 
 
+def get_similar_tokens(query_token, embed_matrix, tokenizer, k=3):
+    def knn(W, x, k):
+        cos = F.cosine_similarity(W, x)
+        _, topk = torch.topk(cos, k=k)
+        topk = topk.cpu().numpy()
+        return topk, [cos[i].item() for i in topk]
+
+    num_words = embed_matrix.shape[0]
+    qv = embed_matrix[tokenizer.word2idx[query_token]]  # embed_dim
+    qv = qv.view(1, -1).expand(num_words, -1)
+    topk, cos = knn(embed_matrix, qv, k + 1)
+    topk = [tokenizer.idx2word[i] for i in topk[1:]]
+    cos = cos[1:]
+    # print(query_token)
+    # for i, c in zip(topk, cos):  # 除去输入词
+    #     print('cosine sim=%.3f: %s' % (c, i))
+    return topk, cos
+
+
 class Tokenizer(object):
     def __init__(self, max_seq_len, fnames, special_tokens=True):
         self.max_seq_len = max_seq_len
@@ -290,7 +317,7 @@ class Tokenizer(object):
 
 
 class ABSADataset(Dataset):
-    def __init__(self, fname, tokenizer, write_file=True, combine=False):
+    def __init__(self, fname, tokenizer, write_file=False, combine=False):
         # data
         self.all_data = {}  #
         self.data = []  # for iterater
@@ -312,10 +339,10 @@ class ABSADataset(Dataset):
             self.build_alldata(fname)
             self.build_dataset()
             self.statistic()
-            if write_file: self.write_formarted_datafile()
 
             self.save_dataset()
 
+        if write_file: self.write_formarted_datafile()
         print('dataset:[{}] \nsentences:{} aspects:{} polars:[{}]\n'.format(
             self.dataset_name,
             self.statistic_data['sentences'],
@@ -572,15 +599,112 @@ class MixDataLoader:
                     yield u_batch, 'unlabeled'
 
 
+class DataAug:
+    def __init__(self, fnames, tokenizer, embed_matrix):
+        self.fnames = fnames
+        self.tokenizer = tokenizer
+        self.embed = torch.tensor(embed_matrix, device=DEVICE)
+        self.window = 3
+        self.datas = []
+
+    def augmentation(self):
+        for fname in self.fnames:
+            print('aug {}……'.format(fname))
+            datas = []
+            with open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore') as f:
+                while True:
+                    context = f.readline().rstrip()
+                    if not context: break
+                    text_left, _, text_right = [s.strip() for s in context.partition("$T$")]
+                    aspect = f.readline().rstrip()
+                    polarity = f.readline().rstrip()
+
+                    context = text_left + " " + aspect + " " + text_right
+                    len_left = len(self.tokenizer.tokenize(text_left))
+                    len_aspect = len(self.tokenizer.tokenize(aspect))
+                    len_context = len(self.tokenizer.tokenize(context))
+                    position_l = max(0, len_left - self.window)
+                    position_r = min(len_left + len_aspect + self.window, len_context - 1)
+
+                    positions = list(range(0, position_l)) + list(range(position_r, len_context))
+                    new_sentences = self._augmentation(context, positions)
+                    for s in new_sentences:
+                        datas.append((s, aspect.lower(), polarity))
+
+            self.write_file(datas, fname)
+
+    def _augmentation(self, sentence, positions):
+        edas = [self.replace, self.delete, self.add, self.swap]
+        tokens = self.tokenizer.tokenize(sentence)
+        new_sentences = []
+        for eda in edas:
+            position = random.choice(positions)
+            new_sentence = eda(tokens[:], position)  # copy
+            # print(new_sentence)
+            new_sentences.append(new_sentence)
+
+        return new_sentences
+
+    def write_file(self, datas, fname):
+        # datas[(sentence,aspect,polarity)]
+        fname = os.path.basename(fname)
+        fname = os.path.join('state', 'eda_%s' % fname)
+        print('write {} sentences:{}'.format(fname, len(datas)))
+        with open(fname, 'w', encoding='utf8') as f:
+            for sentence, aspect, polarity in datas:
+                sentence = sentence.partition(aspect)
+                sentence = sentence[0] + "$T$" + sentence[2]
+
+                f.write(sentence + '\n')
+                f.write(aspect + '\n')
+                f.write(str(polarity) + '\n')
+
+    def replace(self, tokens, p):
+        token = tokens[p]
+        new_tokens, _ = get_similar_tokens(token, embed_matrix=self.embed, tokenizer=self.tokenizer)
+        new_token = new_tokens[random.randint(0, len(new_tokens) - 1)]
+        # print('REPLACE [{}] with [{}]'.format(tokens[p], new_token))
+        return ' '.join(tokens)
+
+    def add(self, tokens, position):
+        num_words = len(self.tokenizer.word2idx)
+        new_token = random.randint(len(SPECIAL_TOKENS), num_words - 1)
+        new_token = self.tokenizer.idx2word[new_token]
+        tokens.insert(position, new_token)
+        # print('ADD [{}] in [{}]'.format(new_token, position))
+        return ' '.join(tokens)
+
+    def swap(self, tokens, position):
+        length = len(tokens)
+        if length > 2:
+            position1 = position + 1 if position + 1 < length else position - 1
+            # print('SWAP [{}], [{}]'.format(tokens[position], tokens[position1]))
+            tokens[position], tokens[position1] = tokens[position1], tokens[position]
+        return ' '.join(tokens)
+
+    def delete(self, tokens, position):
+        # print('DELETE [{}] at [{}]'.format(tokens[position], position))
+        tokens.pop(position)
+        return ' '.join(tokens)
+
+
 if __name__ == '__main__':
-    # test()
+    # build
     tokenizer = build_tokenizer(max_seq_len=MAX_SEQ_LEN)
-    # build_embedding_matrix(tokenizer.word2idx)
+    embed_matrix = build_embedding_matrix(tokenizer.word2idx)
+
+    # augmentation
+    # da = DataAug(fnames=TRAIN_FILES, embed_matrix=embed_matrix, tokenizer=tokenizer)
+    # da.augmentation()
+
     # labeled
-    ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
-    ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
-    ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
-    ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
+    # ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
+    # ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
+    # ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
+    # ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
     # unlabeled
-    ABSADataset(fname='data/unlabeled/formated_electronic.txt', tokenizer=tokenizer)
-    ABSADataset(fname='data/unlabeled/formated_yelp_review.txt', tokenizer=tokenizer)
+    # ABSADataset(fname='data/unlabeled/formated_electronic.txt', tokenizer=tokenizer, write_file=True)
+    # ABSADataset(fname='data/unlabeled/formated_yelp_review.txt', tokenizer=tokenizer, write_file=True)
+    # eda
+    ABSADataset(fname='data/eda/eda_Laptops_Train.xml.seg', tokenizer=tokenizer)
+    ABSADataset(fname='data/eda/eda_Restaurants_Train.xml.seg', tokenizer=tokenizer)
