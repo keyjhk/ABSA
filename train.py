@@ -23,22 +23,25 @@ DATASETS = {
     'restaurant': {
         'train': 'data/semeval14/Restaurants_Train.xml.seg',
         'test': 'data/semeval14/Restaurants_Test_Gold.xml.seg',
+        'eda': 'data/eda/eda_Restaurants_Train.xml.seg',
         'unlabeled': 'data/unlabeled/formated_yelp_review.txt'
     },
     'laptop': {
         'train': 'data/semeval14/Laptops_Train.xml.seg',
         'test': 'data/semeval14/Laptops_Test_Gold.xml.seg',
+        'eda': 'data/eda/eda_Laptops_Train.xml.seg',
         'unlabeled': 'data/unlabeled/formated_electronic.txt'
     }
 }
 
 
 class Instructor:
-    def __init__(self, batch_size=32, max_seq_len=85, valid_ratio=0,
-                 dataset='laptop', semi_supervised=False, clear_model=True):
+    def __init__(self, batch_size=64, max_seq_len=85, valid_ratio=0,
+                 dataset='laptop', semi_supervised=False, union=False,clear_model=True):
         self.batch_size = batch_size
         self.max_seq_len = max_seq_len
         self.semi_supervised = semi_supervised
+        self.union = union
         self.clear_model = clear_model
         # train parameters
         self.device = DEVICE
@@ -49,7 +52,8 @@ class Instructor:
         self.dataset_files = DATASETS
         self.datasetname = dataset
         self.valid_ratio = valid_ratio
-        self.trainset, self.validset, self.testset, self.unlabeledset = None, None, None, None
+        self.trainset, self.validset, self.testset, = None, None, None
+        self.edaset, self.unlabeledset = None, None
         self.trainloader, self.validloader, self.testloader = None, None, None
         self.mixloader = None
         self.tokenizer = None
@@ -98,11 +102,11 @@ class Instructor:
 
         train_fname = self.dataset_files[self.datasetname]['train']
         test_fname = self.dataset_files[self.datasetname]['test']
+        eda_fname = self.dataset_files[self.datasetname]['eda']
         unlabel_fname = self.dataset_files[self.datasetname]['unlabeled']
         trainset = ABSADataset(fname=train_fname, tokenizer=tokenizer)
         testset = ABSADataset(fname=test_fname, tokenizer=tokenizer)
-        # unlabelset = ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
-        unlabelset = trainset  # test speed train
+        edaset = ABSADataset(fname=eda_fname, tokenizer=tokenizer)
 
         if valid_ratio > 0:
             valset_len = int(len(trainset) * valid_ratio)
@@ -112,14 +116,21 @@ class Instructor:
 
         if self.semi_supervised:
             unlabel_ratio = 0.5
-            unlabel_len = int(len(trainset) * unlabel_ratio)
-            trainset, unlabelset = random_split(trainset, [len(trainset) - unlabel_len, unlabel_len])
+            unlabelset = ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
+            # unlabel_len = int(len(trainset) * unlabel_ratio)
+            # trainset, unlabelset = random_split(trainset, [len(trainset) - unlabel_len, unlabel_len])
+        else:
+            unlabelset = testset  # speed load
 
         # dataset
         self.trainset = trainset
         self.validset = validset
         self.testset = testset
+        self.edaset = edaset
         self.unlabeledset = unlabelset
+
+        # union
+        if self.union:self.trainset.union(edaset)
 
         # dataloader
         self.trainloader = DataLoader(dataset=trainset, batch_size=batch_size, shuffle=True)
@@ -339,6 +350,11 @@ class Instructor:
 if __name__ == '__main__':
     instrutor = Instructor(dataset='restaurant')
     # instrutor = Instructor(dataset='laptop')
+
+    # instrutor = Instructor(dataset='restaurant',union=True)
+    # instrutor = Instructor(dataset='laptop',union=True)
+
+
 
     # instrutor = Instructor(dataset='restaurant',semi_supervised=True)
     # instrutor = Instructor(dataset='laptop',semi_supervised=True)

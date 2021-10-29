@@ -236,6 +236,7 @@ class BilayerEncoder(nn.Module):
         # gru_input_size = self.word_embedding_size   # word
         self.uni_gru = nn.GRU(word_embed_dim, hidden_size,
                               batch_first=True, bidirectional=True)
+        self.uni_dropout = nn.Dropout(p=0.3)
         self.bi_gru = nn.GRU(hidden_size * 2 + position_embed_dim,
                              hidden_size,
                              batch_first=True, bidirectional=True)
@@ -247,6 +248,7 @@ class BilayerEncoder(nn.Module):
         pad_x = pack_padded_sequence(x, len_x.cpu(), batch_first=True, enforce_sorted=False)
         uni_out, uni_hidden = self.uni_gru(pad_x)  # hidden:layer*direction,batch,hidden_size
         uni_out, _ = pad_packed_sequence(uni_out, batch_first=True)  # batch,seq_len,hidden_size*2
+        uni_out = self.uni_dropout(uni_out)
         # uni + position
         # bi_in = uni_out[:, :, :self.hidden_size] + uni_out[:, :, self.hidden_size:]
         bi_in = uni_out
@@ -275,8 +277,8 @@ class BilayerEncoderP(nn.Module):
         self.bi_gru = nn.GRU(hidden_size * 2,
                              hidden_size,
                              batch_first=True, bidirectional=True)
-        self.uni_dropout = nn.Dropout(p=0.5)
-        self.bi_dropout = nn.Dropout(p=0.5)
+        self.uni_dropout = nn.Dropout(p=0.3)
+        self.bi_dropout = nn.Dropout(p=0.3)
         # self attention
         self.atention_window = AttentionWindow(hidden_size * 2)
 
@@ -287,7 +289,7 @@ class BilayerEncoderP(nn.Module):
         pad_x = pack_padded_sequence(x, len_x.cpu(), batch_first=True, enforce_sorted=False)
         uni_out, uni_hidden = self.uni_gru(pad_x)  # hidden:layer*direction,batch,hidden_size
         uni_out, _ = pad_packed_sequence(uni_out, batch_first=True)  # batch,seq_len,hidden_size*2
-        # uni_out = self.uni_dropout(uni_out)
+        uni_out = self.uni_dropout(uni_out)
         # uni + position
         # bi_in = uni_out[:, :, :self.hidden_size] + uni_out[:, :, self.hidden_size:]
         bi_in = uni_out

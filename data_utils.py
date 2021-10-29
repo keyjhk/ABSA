@@ -343,6 +343,9 @@ class ABSADataset(Dataset):
             self.save_dataset()
 
         if write_file: self.write_formarted_datafile()
+        self.show_dataset()
+
+    def show_dataset(self):
         print('dataset:[{}] \nsentences:{} aspects:{} polars:[{}]\n'.format(
             self.dataset_name,
             self.statistic_data['sentences'],
@@ -472,7 +475,7 @@ class ABSADataset(Dataset):
                     self.data.append(data_item)
 
     def load_dataset(self):
-        print('loading absa_dataset:{}'.format(self.dat_fname))
+        print('loading dataset:[{}]'.format(self.dat_fname))
         datas = pickle.load(open(self.dat_fname, 'rb'))
         self.data = datas['data']
         self.all_data = datas['all_data']
@@ -570,6 +573,14 @@ class ABSADataset(Dataset):
         self.statistic_data['aspect'] = aspects
         self.statistic_data['polar_count'] = polar_count
 
+    def union(self, dataset):
+        print('union [{}] and [{}]'.format(self.dataset_name,dataset.dataset_name))
+        self.dataset_name = "{}_{}".format(self.dataset_name,dataset.dataset_name)
+        self.all_data.update(dataset.all_data)
+        self.data.extend(dataset.data)
+        self.statistic()
+        self.show_dataset()
+
     def __getitem__(self, index):
         return self.data[index]
 
@@ -578,9 +589,10 @@ class ABSADataset(Dataset):
 
 
 class MixDataLoader:
-    def __init__(self, labeled_loader, unlabeld_loader, semi_supervised=True):
+    def __init__(self, labeled_loader, unlabeld_loader, eda_loader=None, semi_supervised=True):
         self.labeled_loader = labeled_loader
         self.unlabeled_loader = unlabeld_loader
+        self.eda_loader = eda_loader
         self.semi_supervised = semi_supervised
         self.label_len = len(labeled_loader)
         self.unlabel_len = len(unlabeld_loader)
@@ -589,6 +601,9 @@ class MixDataLoader:
         while True:
             for batch in self.labeled_loader:
                 yield batch
+            if self.eda_loader is not None:
+                for batch in self.eda_loader:
+                    yield batch
 
     def alternating_batch(self):
         labeled_loader = self._endless_labeled()  # generator
@@ -663,6 +678,7 @@ class DataAug:
         token = tokens[p]
         new_tokens, _ = get_similar_tokens(token, embed_matrix=self.embed, tokenizer=self.tokenizer)
         new_token = new_tokens[random.randint(0, len(new_tokens) - 1)]
+        tokens[p] = new_token
         # print('REPLACE [{}] with [{}]'.format(tokens[p], new_token))
         return ' '.join(tokens)
 
@@ -706,5 +722,6 @@ if __name__ == '__main__':
     # ABSADataset(fname='data/unlabeled/formated_electronic.txt', tokenizer=tokenizer, write_file=True)
     # ABSADataset(fname='data/unlabeled/formated_yelp_review.txt', tokenizer=tokenizer, write_file=True)
     # eda
-    ABSADataset(fname='data/eda/eda_Laptops_Train.xml.seg', tokenizer=tokenizer)
-    ABSADataset(fname='data/eda/eda_Restaurants_Train.xml.seg', tokenizer=tokenizer)
+    # eda_lap=ABSADataset(fname='data/eda/eda_Laptops_Train.xml.seg', tokenizer=tokenizer)
+    # eda_res=ABSADataset(fname='data/eda/eda_Restaurants_Train.xml.seg', tokenizer=tokenizer)
+

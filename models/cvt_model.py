@@ -19,7 +19,7 @@ class CVTModel(nn.Module):
                  pos_embedding_size=50,
                  polar_embedding_size=50,
                  position_embedding_size=50,  # 50 100 300
-                 encoder_hidden_size=300  # 150 200 300
+                 encoder_hidden_size=300 # 150 200 300
                  ):
 
         super().__init__()
@@ -61,7 +61,7 @@ class CVTModel(nn.Module):
         # primary
         out_size = encoder_hidden_size * 2  # h1+h2
         self.primary = BilayerPrimary(word_embed_dim=word_embedding_size,
-                                      hidden_dim=out_size,
+                                      hidden_dim=out_size,  # outsize
                                       num_polar=num_polar)
         # auxiliary
         # full
@@ -143,13 +143,16 @@ class CVTModel(nn.Module):
             out = self.primary(uni_out, aspect_pool, len_x,aspect_boundary)  # only use uni
             # out = self.primary_mask(mask_u, aspect_pool, len_x,repr2=bi_out)  # masked view u
             # out = self.primary_forward(uni_for, aspect_pool, len_x)  # forward
+            # out = self.primary(uni_for, aspect_pool, len_x)  # forward
             # out = self.primary_backward(uni_back, aspect_pool, len_x)  # backward
 
             loss += self.loss(out, target)
             return loss, out
         elif mode == "unlabeled":  # 无监督训练
             self._freeze_model()
-            label_primary = self.primary(uni_out, aspect_pool, len_x, repr2=bi_out)  # batch,num_polar
+            label_primary = self.primary(uni_for,aspect_pool, len_x)  # batch,num_polar
+            # label_primary = self.primary(uni_out, aspect_pool, len_x, repr2=bi_out)  # batch,num_polar
+
             label_primary = label_primary.detach()
             # auxiliary1
             # full
@@ -167,7 +170,8 @@ class CVTModel(nn.Module):
                                     reduction='batchmean')
             loss_backward = F.kl_div(out_backward.log_softmax(dim=-1), label_primary.softmax(dim=-1),
                                      reduction='batchmean')
-            loss = loss_mask + loss_forward + loss_backward  # loss_full + loss_uni
+            # loss = loss_mask + loss_forward + loss_backward  # loss_full + loss_uni
+            loss = loss_mask   # loss_full + loss_uni
 
             return loss, label_primary
 
@@ -179,7 +183,7 @@ class CVTModel(nn.Module):
 
         return aspect_pool
 
-    def dynamic_mask(self, features, position_indices, len_x, threshold=4, ratio=0.5):
+    def dynamic_mask(self, features, position_indices, len_x, threshold=10, ratio=0.5):
         # features: batch,seq_len,hidden_size
         # position: batch,MAX_LEN  ; len_x: batch
         # a vision radium of a sentence
