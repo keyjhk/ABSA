@@ -84,7 +84,7 @@ class Attention(nn.Module):
             qxx = torch.unsqueeze(qx, dim=2).expand(-1, -1, k_len, -1)  # head*mb_size,q_len,k_len,hidden_dim
             kq = torch.cat((kxx, qxx), dim=-1)  # (n_head*?, q_len, k_len, hidden_dim*2)
             # kq = torch.unsqueeze(kx, dim=1) + torch.unsqueeze(qx, dim=2)
-            score = F.tanh(torch.matmul(kq, self.weight))
+            score = torch.tanh(torch.matmul(kq, self.weight))
         elif self.score_function == 'bi_linear':
             # general  : (q*w)*k^T w矩阵添加是为了非线性操作
             # head*mb_size ,q_len,hidden_dim [BMM] hidden_dim,hidden_dim

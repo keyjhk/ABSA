@@ -46,23 +46,21 @@ class CVTModel(nn.Module):
         # encoder
         self.encoder_hidden_size = encoder_hidden_size
         self.encoder = BilayerEncoderP(word_embed_dim=word_embedding_size,
-                                      position_embed_dim=position_embedding_size,
-                                      hidden_size=encoder_hidden_size,
-                                      )
-
-        # test
-        # self.encoder = Test6(word_embed_dim=word_embedding_size,
-        #                     position_embed_dim=position_embedding_size,
-        #                     polar_embed_dim=polar_embedding_size,
-        #                      pos_dim=pos_embedding_size,
-        #                     hidden_dim=encoder_hidden_size,
-        #                     num_polar=num_polar)
+                                       position_embed_dim=position_embedding_size,
+                                       hidden_size=encoder_hidden_size,
+                                       )
 
         # primary
         out_size = encoder_hidden_size * 2  # h1+h2
-        self.primary = BilayerPrimary(word_embed_dim=word_embedding_size,
-                                      hidden_dim=out_size,
-                                      num_polar=num_polar)
+        # self.primary = BilayerPrimary(word_embed_dim=word_embedding_size,
+        #                               hidden_dim=out_size,
+        #                               num_polar=num_polar)
+
+        self.primary = PolarDecoder(word_embedding=self.word_embedding,
+                                    hidden_size=encoder_hidden_size,
+                                    num_polar = num_polar,
+                                    tokenizer=tokenizer)
+
         # auxiliary
         # full
         self.primary_full = BilayerPrimary(word_embed_dim=word_embedding_size,
@@ -119,10 +117,11 @@ class CVTModel(nn.Module):
         position = squeeze_embedding(position, len_x)
 
         # pool(average) aspect
-        aspect_pool = self.pool_aspect(aspect_indices, aspect_boundary)
+        aspect_pool = self.pool_aspect(aspect_indices, aspect_boundary)  # batch,1,embed_dim
 
         # uni_out,bi_out from encoder
-        bi_out, uni_out = self.encoder(word, position, len_x)
+        # bi_out, uni_out = self.encoder(word, position, len_x)
+        uni_out, uni_hidden = self.encoder(word, position, len_x)
         uni_for = uni_out[:, :, :self.encoder_hidden_size]
         uni_back = uni_out[:, :, self.encoder_hidden_size:]
         mask_u = self.dynamic_mask(uni_out, position_indices, len_x)
@@ -140,23 +139,27 @@ class CVTModel(nn.Module):
 
             # out = self.primary(uni_out, aspect_pool, len_x, repr2=bi_out)  # primary
             # out = self.primary(bi_out, aspect_pool, len_x)  # only use bi
-            out = self.primary(uni_out, aspect_pool, len_x,aspect_boundary)  # only use uni
+            # out = self.primary(uni_out, aspect_pool, len_x, aspect_boundary)  # only use uni
             # out = self.primary_mask(mask_u, aspect_pool, len_x,repr2=bi_out)  # masked view u
             # out = self.primary_forward(uni_for, aspect_pool, len_x)  # forward
             # out = self.primary_backward(uni_back, aspect_pool, len_x)  # backward
+
+            # docoder primary
+            out = self.primary(uni_out,uni_hidden)
+
 
             loss += self.loss(out, target)
             return loss, out
         elif mode == "unlabeled":  # 无监督训练
             self._freeze_model()
-            label_primary = self.primary(uni_out, aspect_pool, len_x, repr2=bi_out)  # batch,num_polar
+            label_primary = self.primary(uni_out, aspect_pool, len_x)  # batch,num_polar
             label_primary = label_primary.detach()
             # auxiliary1
             # full
             # out_full = self.primary_full(uni_out, aspect_pool, len_x, repr_2=encoder_out)
 
             # masked encoder
-            out_mask = self.primary_mask(mask_u, aspect_pool, len_x, repr2=bi_out)  # batch,num_polar
+            out_mask = self.primary_mask(mask_u, aspect_pool, len_x)  # batch,num_polar
             #  forward backward
             out_forward = self.primary_forward(uni_for, aspect_pool, len_x)
             out_backward = self.primary_backward(uni_back, aspect_pool, len_x)  # backward

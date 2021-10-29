@@ -92,6 +92,63 @@ class LocationDecoder(nn.Module):
         return torch.stack(locations, dim=1)  # batch,2,seq_len
 
 
+class PolarDecoder(nn.Module):
+    def __init__(self,
+                 word_embedding,
+                 hidden_size,
+                 num_polar,
+                 tokenizer,
+                 name):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.hidden_size = hidden_size
+        self.word_embedding = word_embedding
+        self.num_polar = num_polar
+
+
+        self.attention_ch = Attention(hidden_size)  # hidden/context score_function='mlp'
+        word_dim = word_embedding.embedding_dim
+        self.decoder = nn.GRU(word_dim,
+                              hidden_size, batch_first=True)
+
+        self.dense = nn.Linear(hidden_size * 3, num_polar)
+
+    def forward(self, encoder_out, last_hidden):
+        # encoder: batch,seq_len,hidden_size*2 ;
+        # aspect : # batch,1,embed_dim
+        # last_hidden: 2(directions),batch,hidden_size
+        mb ,seq = encoder_out.shape[0],encoder_out.shape[1]
+
+        device = encoder_out.device
+
+        # init decoder input
+        sos_idx = self.tokenizer.word2idx[SOS_TOKEN]
+        sos = torch.tensor([sos_idx] * mb, device=device).view(-1, 1)  # batch,1
+        sos = self.word_embedding(sos)  # batch,1,word_dim
+        decoder_out = sos
+        # int decoder hidden
+        # last_hidden from encoder, merge forward/backward
+        last_hidden = last_hidden[0] + last_hidden[1]  # batch,hidden
+        last_hidden = last_hidden.unsqueeze(0)  # 1, batch,hidden_size
+
+        # decoder
+        # decoder_out: batch,1,hidden_size  ; encoder: batch,seq,hidden_size
+        encoder_out = encoder_out[:, :, :self.hidden_size] + encoder_out[:, :, self.hidden_size:]
+        decoder_out, _ = self.decoder(decoder_out, last_hidden)
+        _, score = self.attention_ch(q=decoder_out, k=encoder_out)  # batch,1,seq_len
+        context = torch.bmm(score,encoder_out)  # batch,1,hidden_size
+
+        smax = torch.max(encoder_out,dim=1,keepdim=True)[0]  # batch,1,hidden_size
+        # ch = torch.cat((context, decoder_out), dim=-1)  # batch,1,hidden_size*2
+        ch = torch.cat((context, decoder_out,smax), dim=-1)  # batch,1,hidden_size*3
+        ch = ch.squeeze(1)  # batch,hidden_size*2
+
+
+        out = self.dense(ch)  # batch,num_polar
+
+        return out
+
+
 class EncoderPosition(nn.Module):
     '''
     论文的版本 只考虑位置信息得到编码
@@ -296,7 +353,8 @@ class BilayerEncoderP(nn.Module):
         # bi_out, _ = self.bi_sa(k=bi_out, q=bi_out)  # batch,seq_len,hidden_size * 2
         ua = self.atention_window(uni_out)
         # uni_out = ua
-        return bi_out, uni_out
+        # return bi_out, uni_out
+        return uni_out, uni_hidden  # for decoder
 
 
 class BilayerPrimary(nn.Module):
@@ -312,8 +370,8 @@ class BilayerPrimary(nn.Module):
         self.attention_hap = NoQueryAttention(word_embed_dim + hidden_dim,
                                               score_function='bi_linear')
 
-        self.output_layer = nn.Linear(hidden_dim *2, hidden_dim)
-        self.output_layer1 = nn.Linear(hidden_dim *2, hidden_dim)
+        self.output_layer = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.output_layer1 = nn.Linear(hidden_dim * 2, hidden_dim)
         self.attention_w = AttentionWindow(hidden_dim)
         self.dense = nn.Sequential(
             nn.Dropout(p=0.5),
@@ -343,7 +401,7 @@ class BilayerPrimary(nn.Module):
 
         return torch.cat((s_max, sa), dim=-1)  # batch,hidden_size*2
 
-    def forward(self, repr, aspect, len_x, aspect_boundary=None,repr2=None):
+    def forward(self, repr, aspect, len_x, aspect_boundary=None, repr2=None):
         outputs = self.output_layer(self.project(repr, aspect, len_x, aspect_boundary))
         if repr2 is not None:
             outputs += self.output_layer1(self.project(repr2, aspect, len_x, aspect_boundary))
