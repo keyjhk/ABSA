@@ -94,6 +94,7 @@ class Instructor:
         self.tip()
 
     def tip(self):
+        self.logger.info('tips'.center(30, '='))
         opt = self.opt
         for x in opt:
             self.logger.info(x)
@@ -167,8 +168,7 @@ class Instructor:
         self._reset_params()
 
     def _reset_params(self):
-        print('=' * 30)
-        print('reset params:')
+        print('reset params:'.center(30, '='))
         for name, p in self.model.named_parameters():
             if 'word_embedding' in name:
                 print('skip reset parameter: {}'.format(name))
@@ -184,21 +184,11 @@ class Instructor:
         print('=' * 30)
 
     def set_logger(self):
-        logger = logging.getLogger()
-        logger.setLevel(logging.INFO)
-
-        log_format = '%(asctime)s - %(levelname)s: %(message)s'
         logger_file = '{}_{}_{}_{}.log'.format(self.opt.name,
                                                self.datasetname,
                                                self.model_name,
                                                strftime("%m%d-%H%M", localtime()))
-        logger_file = 'state/log/' + logger_file
-        file_hander = logging.FileHandler(logger_file, mode='w', encoding='utf8')
-        file_hander.setFormatter(logging.Formatter(log_format))
-
-        logger.addHandler(file_hander)  # handler
-        logger.addHandler(logging.StreamHandler())  # console
-        return logger
+        return set_logger(name='Instructor', file=logger_file)
 
     def _evaluate_acc_f1(self, dataloader):
         self.model.eval()
@@ -269,6 +259,7 @@ class Instructor:
             self.optimizer.load_state_dict(model_cpt['optimizer'])
 
     def clear(self):
+        self.logger.info('remove saved models'.center(30, '='))
         if not self.clear_model: return
         model_cpt = self.get_model_cpt()
         model_cpt = [os.path.join('state', x) for x in model_cpt]
@@ -277,10 +268,12 @@ class Instructor:
             for p in model_cpt:
                 os.remove(p)
                 self.logger.info('remove {}'.format(p))
+        self.logger.info('=' * 30)
 
-    def eval(self, times=10):
+    def eval(self):
         # in testloader
         acc, f1, loss = 0, 0, 0
+        times = self.opt.eval_times
         for t in range(times):
             _acc, _f1, _loss = self._evaluate_acc_f1(self.testloader)
             acc += _acc
@@ -291,10 +284,10 @@ class Instructor:
         loss /= times
         self.logger.info('TEST EVAL'.center(30, '='))
         self.logger.info('loss:{:.4f} acc:{:.2f}% f1:{:2f}'.format(loss, acc, f1))
+        return 'loss:{:.4f} acc:{:.2f}% f1:{:2f}'.format(loss, acc, f1)
 
     def run(self):
-        self.clear()  # clear the former model in
-        print('=' * 30)
+        self.logger.info('run models'.center(30, '='))
         step_every = self.opt.step_every
         print_every = self.opt.print_every
 
@@ -358,12 +351,43 @@ class Instructor:
                 break
 
         self.load()
-        self.eval()
+        return self.eval()
 
 
-if __name__ == '__main__':
-    opt = Option(PARAMETERS)
+def set_logger(name=None, file=None, level=logging.INFO):
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
 
+    if file:
+        file = 'state/log/' + file
+        log_format = '%(asctime)s - %(levelname)s: %(message)s'
+        file_hander = logging.FileHandler(file, mode='w', encoding='utf8')
+        file_hander.setFormatter(logging.Formatter(log_format))
+        logger.addHandler(file_hander)  # handler
+
+    logger.addHandler(logging.StreamHandler())  # console
+    return logger
+
+
+def parameter_explore(opt, p, values):
+    logger = set_logger(name='parameter explore'
+                        , file='parameters_{}_{}.log'.format(p, strftime("%m%d-%H%M", localtime())))
+    results = []
+    logger.info('parameters:{} explore!'.format(p).center(30, '*'))
+    for v in values:
+        _opt = opt.set({
+            p: v
+        }, opt.name + '_{}_{}'.format(p, v))
+        _ins = Instructor(_opt)
+        res = _ins.run()
+        results.append((v, res))
+
+    for v, r in results:
+        logger.info('[{}]={} [res]:{}'.format(p, v, r))
+    logger.info('*' * 30)
+
+
+def main():
     # supervised
     opt_su_res = opt.set({
         'semi_supervised': False,
@@ -385,9 +409,22 @@ if __name__ == '__main__':
         'dataset': 'laptop'
     }, name='semi_lap')
 
-    # instrutor = Instructor(opt_su_res)
-    instrutor = Instructor(opt_su_lap)
+    instrutor = Instructor(opt_su_res)
+    # instrutor = Instructor(opt_su_lap)
     # instrutor = Instructor(opt_semi_res)
     # instrutor = Instructor(opt_semi_lap)
 
     instrutor.run()
+
+
+if __name__ == '__main__':
+    opt = Option(PARAMETERS)
+
+    parameter_explore(opt=opt.set({
+        'semi_supervised': True,
+        'dataset': 'restaurant',
+        'valid_ratio': 0.5
+    }, name='semi_res'),
+        p='threshould',
+        values=list(range(4, 6)))
+    # main()

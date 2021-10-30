@@ -27,6 +27,8 @@ PARAMETERS = {
     'valid_ratio': 0,
     'dataset': 'laptop',
     "save_model_name": '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl',
+    # eval
+    'eval_times':10,
     # optimzer
     'semi_lr': 1e-3,
     'semi_l2': 5e-3,
