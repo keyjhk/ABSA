@@ -35,6 +35,9 @@ class Option:
             if key in self._exclude_iter: continue
             yield '[ {} ]:{}'.format(key, self.option[key])
 
+    def __len__(self):
+        return len(self.option)
+
     def __getattr__(self, item):
         try:
             return self.option[item]
@@ -188,7 +191,8 @@ class Instructor:
                                                self.datasetname,
                                                self.model_name,
                                                strftime("%m%d-%H%M", localtime()))
-        return set_logger(name='Instructor', file=logger_file)
+        logger_name = '{}_{}'.format(self.opt.name, self.model_name)
+        return set_logger(name=logger_name, file=logger_file)
 
     def _evaluate_acc_f1(self, dataloader):
         self.model.eval()
@@ -369,25 +373,43 @@ def set_logger(name=None, file=None, level=logging.INFO):
     return logger
 
 
-def parameter_explore(opt, p, values):
-    logger = set_logger(name='parameter explore'
-                        , file='parameters_{}_{}.log'.format(p, strftime("%m%d-%H%M", localtime())))
-    results = []
-    logger.info('parameters:{} explore!'.format(p).center(30, '*'))
-    for v in values:
-        _opt = opt.set({
-            p: v
-        }, opt.name + '_{}_{}'.format(p, v))
-        _ins = Instructor(_opt)
-        res = _ins.run()
-        results.append((v, res))
+def parameter_explore(opt, par_vals):
+    # par_vals:{p:[],...}
+    name = 'p'
+    for p in par_vals.keys():
+        name += '_{}{}'.format(p[:3], len(par_vals[p]))
 
-    for v, r in results:
-        logger.info('[{}]={} [res]:{}'.format(p, v, r))
-    logger.info('*' * 30)
+    logger = set_logger(name='parameter_explore',
+                        file='{}_{}.log'.format(name, strftime("%m%d-%H%M", localtime())))
+    for p, values in par_vals.items():
+        pv = 'parameters_{}{}-{}'.format(p, values[0], values[-1])
+        results = []
+        logger.info(pv.center(30, '*'))
+        for v in values:
+            _opt = opt.set({
+                p: v
+            }, opt.name + '_{}_{}'.format(p, v))
+            _ins = Instructor(_opt)
+            res = _ins.run()
+            results.append((v, res))
+            logger.info('[{}:{}] :{}'.format(p, v,res).center(30, '='))
+
+        for v, r in results:
+            logger.info('[{}]={} [res]:{}'.format(p, v, r))
+        logger.info('*' * 30)
 
 
 def main():
+    instrutor = Instructor(opt_su_res)
+    # instrutor = Instructor(opt_su_lap)
+    # instrutor = Instructor(opt_semi_res)
+    # instrutor = Instructor(opt_semi_lap)
+
+    instrutor.run()
+
+
+if __name__ == '__main__':
+    opt = Option(PARAMETERS)
     # supervised
     opt_su_res = opt.set({
         'semi_supervised': False,
@@ -409,22 +431,17 @@ def main():
         'dataset': 'laptop'
     }, name='semi_lap')
 
-    instrutor = Instructor(opt_su_res)
-    # instrutor = Instructor(opt_su_lap)
-    # instrutor = Instructor(opt_semi_res)
-    # instrutor = Instructor(opt_semi_lap)
+    # p
+    ps = {
+        'threshould': list(range(3, 20))
+    }
 
-    instrutor.run()
+    # parameter_explore(opt_semi_res.set({
+    #     'valid_ratio': 0.5
+    # }),ps)
 
-
-if __name__ == '__main__':
-    opt = Option(PARAMETERS)
-
-    parameter_explore(opt=opt.set({
-        'semi_supervised': True,
-        'dataset': 'restaurant',
+    parameter_explore(opt_semi_lap.set({
         'valid_ratio': 0.5
-    }, name='semi_res'),
-        p='threshould',
-        values=list(range(4, 6)))
+    }), ps)
+
     # main()

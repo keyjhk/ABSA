@@ -111,8 +111,8 @@ class CVTModel(nn.Module):
         uni_forward = uni_out[:, :, :self.encoder_hidden_size]
         uni_backward = uni_out[:, :, self.encoder_hidden_size:]
         uni_primary = uni_forward + uni_backward
-        uni_mask = self.dynamic_mask(uni_primary, position_indices, len_x)
-        uni_weight = self.dynamic_mask(uni_primary, position_indices, len_x,kind='weight')
+        uni_mask = self.dynamic_features(uni_primary, position_indices, len_x)
+        uni_weight = self.dynamic_features(uni_primary, position_indices, len_x, kind='weight')
 
         loss = 0
         if mode == "labeled":  # 监督训练
@@ -140,16 +140,16 @@ class CVTModel(nn.Module):
             # out_full = self.primary_full(uni_out, aspect_pool, len_x, repr_2=encoder_out)
 
 
-            # out_mask = self.primary_mask(uni_mask, uni_hidden)  # batch,num_polar
-            # loss_mask = F.kl_div(out_mask.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+            out_mask = self.primary_mask(uni_mask, uni_hidden)  # batch,num_polar
+            loss_mask = F.kl_div(out_mask.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
             # out_full = self.primary_full(uni_primary, uni_hidden)
             # loss_full = F.kl_div(out_full.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
-            out_weight = self.primary_weight(uni_weight, uni_hidden)
-            loss_weight = F.kl_div(out_weight.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
-            # loss = loss_mask
-            loss = loss_weight
+            # out_weight = self.primary_weight(uni_weight, uni_hidden)
+            # loss_weight = F.kl_div(out_weight.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+            loss = loss_mask
+            # loss = loss_weight
             # loss = loss_full + loss_mask
 
 
@@ -165,7 +165,7 @@ class CVTModel(nn.Module):
         return aspect_pool
 
 
-    def dynamic_mask(self, features, position_indices, len_x, threshould=None, mask_ratio=None, kind='mask'):
+    def dynamic_features(self, features, position_indices, len_x, threshould=None, mask_ratio=None, kind='mask'):
         threshould = threshould if  threshould else self.threshould
         mask_ratio = mask_ratio if  mask_ratio else self.mask_ratio
         # threshould 6 is optimal for res/lap;
@@ -178,7 +178,7 @@ class CVTModel(nn.Module):
         max_x = len_x.max()
 
         # cal window size
-        window_size = torch.floor_divide(len_x, 4).unsqueeze(1)  # batch,1 ;half of a sentence
+        window_size = torch.floor_divide(len_x, 2).unsqueeze(1)  # batch,1 ;half of a sentence
         threshould = torch.tensor([threshould] * mb, device=device).unsqueeze(1)  # batch,1;
         window_size = torch.cat((window_size, threshould), dim=-1)  # batch,2
         window_size = window_size.min(dim=-1, keepdim=True)[0]  # batch,1
@@ -199,21 +199,7 @@ class CVTModel(nn.Module):
         else:
             raise Exception('error dynamic kind ')
 
-    def dynamic_weight(self, features, position_indices, len_x,threshold=6):
-        # w_i: 1-pos_i/len
-        # features: batch,seq_len,hidden_size
-        # position: batch,MAX_LEN  ; len_x: batch
 
-        device = position_indices.device
-        max_x = len_x.max()
-        # weight = 1 - torch.div(position_indices, len_x.view(-1, 1))  # batch,MAX_LEN
-
-
-        weight = 1 - torch.div(position_indices, 85)  # batch,MAX_LEN ; MAX_LEN = 85 test
-        weight = weight[:, :max_x].unsqueeze(dim=2).to(device)  # batch,seq_len,1
-        weight = weight.masked_fill(weight < 0, 0)
-
-        return features * weight  # batch,seq,hidden_size
 
     def _freeze_model(self):
         # freeze primary only; encoder is unfreezed
