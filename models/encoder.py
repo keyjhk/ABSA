@@ -98,27 +98,40 @@ class PolarDecoder(nn.Module):
                  hidden_size,
                  num_polar,
                  tokenizer,
-                 name):
+                 name="primary", p=0):
         super().__init__()
         self.tokenizer = tokenizer
         self.hidden_size = hidden_size
         self.word_embedding = word_embedding
         self.num_polar = num_polar
+        self.name = name
 
-
-        self.attention_ch = Attention(hidden_size)  # hidden/context score_function='mlp'
         word_dim = word_embedding.embedding_dim
         self.decoder = nn.GRU(word_dim,
                               hidden_size, batch_first=True)
 
+        self.attention_ch = Attention(hidden_size)  # hidden/context score_function='mlp'
+        self.attention_dropout = nn.Dropout(p=p)
         self.dense = nn.Linear(hidden_size * 3, num_polar)
 
+    def clone(self, name, p=0):
+        # share decoder /word embed
+        # attention mechanism/dense  is different
+        polar_decoder = PolarDecoder(word_embedding=self.word_embedding,
+                                     hidden_size=self.hidden_size,
+                                     num_polar=self.num_polar,
+                                     tokenizer=self.tokenizer,
+                                     p=p,
+                                     name=name,
+                                     )
+        polar_decoder.decoder = self.decoder
+        return polar_decoder
+
     def forward(self, encoder_out, last_hidden):
-        # encoder: batch,seq_len,hidden_size*2 ;
+        # encoder: batch,seq_len,hidden_size ;
         # aspect : # batch,1,embed_dim
         # last_hidden: 2(directions),batch,hidden_size
-        mb ,seq = encoder_out.shape[0],encoder_out.shape[1]
-
+        mb, seq = encoder_out.shape[0], encoder_out.shape[1]
         device = encoder_out.device
 
         # init decoder input
@@ -133,16 +146,14 @@ class PolarDecoder(nn.Module):
 
         # decoder
         # decoder_out: batch,1,hidden_size  ; encoder: batch,seq,hidden_size
-        encoder_out = encoder_out[:, :, :self.hidden_size] + encoder_out[:, :, self.hidden_size:]
         decoder_out, _ = self.decoder(decoder_out, last_hidden)
         _, score = self.attention_ch(q=decoder_out, k=encoder_out)  # batch,1,seq_len
-        context = torch.bmm(score,encoder_out)  # batch,1,hidden_size
+        score = self.attention_dropout(score)
+        context = torch.bmm(score, encoder_out)  # batch,1,hidden_size
 
-        smax = torch.max(encoder_out,dim=1,keepdim=True)[0]  # batch,1,hidden_size
-        # ch = torch.cat((context, decoder_out), dim=-1)  # batch,1,hidden_size*2
-        ch = torch.cat((context, decoder_out,smax), dim=-1)  # batch,1,hidden_size*3
-        ch = ch.squeeze(1)  # batch,hidden_size*2
-
+        smax = torch.max(encoder_out, dim=1, keepdim=True)[0]  # batch,1,hidden_size
+        ch = torch.cat((context, decoder_out, smax), dim=-1)  # batch,1,hidden_size*3
+        ch = ch.squeeze(1)  # batch,hidden_size*3
 
         out = self.dense(ch)  # batch,num_polar
 

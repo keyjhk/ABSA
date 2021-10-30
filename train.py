@@ -1,59 +1,70 @@
 import re
 import logging
-from random import random
 
-import torch
 import torch.nn as nn
-import torch.optim as opt
+import torch.optim as optim
 from time import strftime, localtime
 from sklearn import metrics
 from torch.utils.data import random_split, DataLoader
 
 from data_utils import *
 from models.cvt_model import CVTModel
+from config import PARAMETERS, EXCLUDE
 
-DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-PRINT_EVERY = 1  # how many epoches
-STEP_EVERY = 0.1  # 0<x<1 ,percent in labeled data
 
-# model_name for save/load
-SAVE_MODEL_NAME = '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl'
-# dataset
-DATASETS = {
-    'restaurant': {
-        'train': 'data/semeval14/Restaurants_Train.xml.seg',
-        'test': 'data/semeval14/Restaurants_Test_Gold.xml.seg',
-        'unlabeled': 'data/unlabeled/formated_yelp_review.txt'
-    },
-    'laptop': {
-        'train': 'data/semeval14/Laptops_Train.xml.seg',
-        'test': 'data/semeval14/Laptops_Test_Gold.xml.seg',
-        'unlabeled': 'data/unlabeled/formated_electronic.txt'
-    }
-}
+class Option:
+    def __init__(self, options, name='default'):
+        self.option = options
+        self.name = name
+        self._exclude_iter = EXCLUDE
+
+    def set(self, new_options, name=''):
+        if not isinstance(new_options, dict):
+            raise Exception('options should be a dict')
+        _option = self.option.copy()
+
+        for key, val in new_options.items():
+            _option[key] = val
+        name = name if name else self.name
+
+        return Option(_option, name)
+
+    def __iter__(self):
+        keys = self.option.keys()
+        for key in keys:
+            if key in self._exclude_iter: continue
+            yield '[ {} ]:{}'.format(key, self.option[key])
+
+    def __getattr__(self, item):
+        try:
+            return self.option[item]
+        except Exception as e:
+            print('key:{} not found'.format(item))
+            raise e
 
 
 class Instructor:
-    def __init__(self, batch_size=32, max_seq_len=85, valid_ratio=0,
-                 dataset='laptop', semi_supervised=False, clear_model=True):
-        self.batch_size = batch_size
-        self.max_seq_len = max_seq_len
-        self.semi_supervised = semi_supervised
-        self.clear_model = clear_model
+    def __init__(self, opt):
+        self.opt = opt
+        self.batch_size = opt.batch_size
+        self.max_seq_len = opt.max_seq_len
+        self.semi_supervised = opt.semi_supervised
+        self.clear_model = opt.clear_model
         # train parameters
-        self.device = DEVICE
+        self.device = opt.device
         self.start_epoch = 0
         self.max_val_acc = 0
         self.max_val_f1 = 0
         # dataset/dataloader
-        self.dataset_files = DATASETS
-        self.datasetname = dataset
-        self.valid_ratio = valid_ratio
+        self.dataset_files = opt.datasets
+        self.datasetname = opt.dataset
+        self.valid_ratio = opt.valid_ratio
         self.trainset, self.validset, self.testset, self.unlabeledset = None, None, None, None
         self.trainloader, self.validloader, self.testloader = None, None, None
         self.mixloader = None
         self.tokenizer = None
         self.pretrain_embedding = None
+        self.save_model_name = opt.save_model_name
         # model
         self.model = None
         self.inputs_cols = None
@@ -64,14 +75,14 @@ class Instructor:
         self.init_model()
         self.loss = nn.CrossEntropyLoss()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
-        if semi_supervised:
+        if self.semi_supervised:
             # 1e-3过拟合 5e-3 欠拟
-            self.patience = 30
-            self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=5e-3)  # 1e-3 for weight of semi-supervised
+            self.patience = opt.patience
+            self.optimizer = optim.Adam(_params, lr=opt.lr, weight_decay=opt.l2)
         else:
             # 1e-3过拟合 原1e-2
-            self.patience = 10
-            self.optimizer = opt.Adam(_params, lr=1e-3, weight_decay=1e-2)  # weight_decay=0.01
+            self.patience = opt.semi_patience
+            self.optimizer = optim.Adam(_params, lr=opt.semi_lr, weight_decay=opt.semi_l2)
         # logger
         self.logger = self.set_logger()
 
@@ -80,12 +91,17 @@ class Instructor:
         self.tip()
 
     def tip(self):
-        self.logger.info('[dataset:{} semisupervised:{}]'.format(self.datasetname, self.semi_supervised))
+        opt = self.opt
+        for x in opt:
+            self.logger.info(x)
 
-        dataset_info = 'init dataset:\ntrain:{} valid:{} unlabeled:{} test:{}'.format(
+        dataset_info = 'init dataset:{} semi:{}' \
+                       '\ntrain:{} valid:{} unlabeled:{} test:{}'.format(
+            self.datasetname,self.semi_supervised,
             len(self.trainset), len(self.validset), len(self.unlabeledset), len(self.testset)
         )
         self.logger.info(dataset_info)
+        self.logger.info('=' * 30)
 
     def init_dataset(self):
         max_seq_len = self.max_seq_len
@@ -101,20 +117,13 @@ class Instructor:
         unlabel_fname = self.dataset_files[self.datasetname]['unlabeled']
         trainset = ABSADataset(fname=train_fname, tokenizer=tokenizer)
         testset = ABSADataset(fname=test_fname, tokenizer=tokenizer)
-        # unlabelset = ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
-        unlabelset = trainset  # test speed train
+        unlabelset = trainset if not self.semi_supervised else ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
 
         if valid_ratio > 0:
             valset_len = int(len(trainset) * valid_ratio)
             trainset, validset = random_split(trainset, [len(trainset) - valset_len, valset_len])
         else:
             validset = testset
-
-        if self.semi_supervised:
-            unlabel_ratio = 0.5
-            unlabel_len = int(len(trainset) * unlabel_ratio)
-            trainset, unlabelset = random_split(trainset, [len(trainset) - unlabel_len, unlabel_len])
-
         # dataset
         self.trainset = trainset
         self.validset = validset
@@ -131,12 +140,22 @@ class Instructor:
                                        unlabeld_loader=unlabeled_loader, semi_supervised=self.semi_supervised)
 
     def init_model(self):
+        opt = self.opt
         tokenizer = self.tokenizer
         self.model = CVTModel(num_pos=len(tokenizer.pos2idx),
                               num_polar=len(tokenizer.polar2idx),
                               num_position=tokenizer.max_seq_len,
                               pretrained_embedding=self.pretrain_embedding,
-                              tokenizer=tokenizer
+                              tokenizer=tokenizer,
+                              # encoder
+                              word_embedding_size=opt.word_embedding_size,
+                              pos_embedding_size=opt.pos_embedding_size,
+                              polar_embedding_size=opt.polar_embedding_size,
+                              position_embedding_size=opt.position_embedding_size,
+                              encoder_hidden_size=opt.encoder_hidden_size,
+                              # dynamic mask/weight
+                              threshould=opt.threshould,
+                              mask_ratio=opt.mask_ratio
                               ).to(self.device)
         self.model_name = self.model.name
         self.inputs_cols = self.model.inputs_cols
@@ -146,12 +165,13 @@ class Instructor:
         print('=' * 30)
         print('reset params:')
         for name, p in self.model.named_parameters():
-            if 'embed' in name:
+            if 'word_embedding' in name:
                 print('skip reset parameter: {}'.format(name))
                 continue
             if p.requires_grad:
                 if len(p.shape) > 1:
-                    torch.nn.init.xavier_uniform_(p)
+                    # torch.nn.init.xavier_uniform_(p)
+                    torch.nn.init.xavier_normal_(p)
                 else:
                     stdv = 1. / math.sqrt(p.shape[0])
                     torch.nn.init.uniform_(p, a=-stdv, b=stdv)
@@ -162,12 +182,14 @@ class Instructor:
         logger = logging.getLogger()
         logger.setLevel(logging.INFO)
 
-        Format = '%(asctime)s - %(levelname)s: %(message)s'
-        logger_file = '{}_{}_{}.log'.format(self.datasetname, self.model_name,
-                                            strftime("%m%d-%H%M", localtime()))
+        log_format = '%(asctime)s - %(levelname)s: %(message)s'
+        logger_file = '{}_{}_{}_{}.log'.format(self.opt.name,
+                                               self.datasetname,
+                                               self.model_name,
+                                               strftime("%m%d-%H%M", localtime()))
         logger_file = 'state/log/' + logger_file
         file_hander = logging.FileHandler(logger_file, mode='w', encoding='utf8')
-        file_hander.setFormatter(logging.Formatter(Format))
+        file_hander.setFormatter(logging.Formatter(log_format))
 
         logger.addHandler(file_hander)  # handler
         logger.addHandler(logging.StreamHandler())  # console
@@ -202,6 +224,7 @@ class Instructor:
         return acc * 100, f1 * 100, loss
 
     def save(self, model, epoch, acc, f1):
+        save_model_name = self.save_model_name
         states = {
             'model': model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
@@ -209,7 +232,7 @@ class Instructor:
             'acc': acc,
             'f1': f1,
         }
-        fname = SAVE_MODEL_NAME.format(dataset=self.datasetname,
+        fname = save_model_name.format(dataset=self.datasetname,
                                        model=self.model_name, epoch=epoch,
                                        acc=acc, f1=f1
                                        )
@@ -267,23 +290,20 @@ class Instructor:
     def run(self):
         self.clear()  # clear the former model in
         print('=' * 30)
+        step_every = self.opt.step_every
+        print_every = self.opt.print_every
+
         max_val_acc = self.max_val_acc
         max_val_f1 = self.max_val_f1
         max_val_epoch = self.start_epoch
         epoch = self.start_epoch
 
         label_steps = self.mixloader.label_len  # how many iters in the labeled dataset
-        train_steps = int(STEP_EVERY * label_steps)  # how many steps then calculate the train acc/loss
+        train_steps = max(1, int(step_every * label_steps))  # how many steps then calculate the train acc/loss
         step = 0
         n_correct, n_total, loss_total = 0, 0, 0
-        unlabel_mode_ratio = lambda epoch: round(0.5 + 1 / (epoch + 1e-9), 1)  # decide use unlabelded data
         for batch, mode in self.mixloader.alternating_batch():
-            if mode == 'unlabeled':
-                pass
-                # if random() < unlabel_mode_ratio(epoch):
-                #     continue  # skip unlabeled data
-                # self.logger.info('trigger unlabeled epoch:{} ratio:{}'.format(epoch,unlabel_mode_ratio(epoch)))
-            else:
+            if mode == 'labeled':
                 step += 1
             self.model.train()
             self.optimizer.zero_grad()
@@ -293,7 +313,7 @@ class Instructor:
             self.optimizer.step()
 
             # progress
-            if mode == 'unlabeled': continue
+            if mode == 'unlabeled': continue  # skip eval
             # loss,acc on train , 1 step 1 show
             percent = 100 * (step % label_steps) / label_steps
             targets = batch['target'].to(self.device)
@@ -312,7 +332,7 @@ class Instructor:
                 print('-' * 30)
 
             # evaluate in valid
-            if step % (PRINT_EVERY * label_steps) == 0:
+            if step % (print_every * label_steps) == 0:
                 acc, f1, loss = self._evaluate_acc_f1(self.validloader)
                 info = 'epoch:{} loss:{:.4f} acc:{:.2f}% f1:{:2f} '.format(epoch, loss, acc, f1)
                 print('=' * 30,
@@ -337,11 +357,32 @@ class Instructor:
 
 
 if __name__ == '__main__':
-    instrutor = Instructor(dataset='restaurant')
-    # instrutor = Instructor(dataset='laptop')
+    opt = Option(PARAMETERS)
 
-    # instrutor = Instructor(dataset='restaurant',semi_supervised=True)
-    # instrutor = Instructor(dataset='laptop',semi_supervised=True)
+    # supervised
+    opt_su_res = opt.set({
+        'semi_supervised': False,
+        'dataset': 'restaurant'
+    }, name='sup_res')
+
+    opt_su_lap = opt.set({
+        'semi_supervised': False,
+        'dataset': 'laptop'
+    }, name='sup_lap')
+    # semi_supervised
+    opt_semi_res = opt.set({
+        'semi_supervised': True,
+        'dataset': 'restaurant'
+    }, name='semi_res')
+
+    opt_semi_lap = opt.set({
+        'semi_supervised': True,
+        'dataset': 'laptop'
+    }, name='semi_lap')
+
+    # instrutor = Instructor(opt_su_res)
+    instrutor = Instructor(opt_su_lap)
+    # instrutor = Instructor(opt_semi_res)
+    # instrutor = Instructor(opt_semi_lap)
 
     instrutor.run()
-    # instrutor.eval()
