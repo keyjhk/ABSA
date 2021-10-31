@@ -1,6 +1,7 @@
 from time import strftime, localtime
 import logging
 
+import numpy
 import torch.nn as nn
 import torch.optim as optim
 from sklearn import metrics
@@ -83,7 +84,9 @@ class Instructor:
         self.inputs_cols = None
         self.best_model = None
         self.model_name = None
+
         # init
+        self.reproduce()
         self.init_dataset()
         self.init_model()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
@@ -115,6 +118,17 @@ class Instructor:
         )
         self.logger.info(dataset_info)
         self.logger.info('=' * 30)
+
+    def reproduce(self):
+        opt = self.opt
+        if opt.seed is not None:
+            random.seed(opt.seed)
+            numpy.random.seed(opt.seed)
+            torch.manual_seed(opt.seed)
+            torch.cuda.manual_seed(opt.seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
+            os.environ['PYTHONHASHSEED'] = str(opt.seed)
 
     def init_dataset(self):
         max_seq_len = self.max_seq_len
@@ -149,7 +163,7 @@ class Instructor:
         self.trainloader = DataLoader(dataset=trainset, batch_size=batch_size, shuffle=True)
         self.validloader = DataLoader(dataset=validset, batch_size=batch_size, shuffle=True)
         self.testloader = DataLoader(dataset=testset, batch_size=batch_size, shuffle=True)
-        unlabeled_loader = DataLoader(dataset=unlabelset, batch_size=batch_size)  # not shuffle
+        unlabeled_loader = DataLoader(dataset=unlabelset, batch_size=batch_size, shuffle=True)
 
         self.mixloader = MixDataLoader(labeled_loader=self.trainloader,
                                        unlabeld_loader=unlabeled_loader, semi_supervised=self.semi_supervised)
@@ -215,9 +229,9 @@ class Instructor:
         with torch.no_grad():
             for batch in dataloader:
                 inputs = [batch[col].to(self.device) for col in self.inputs_cols]
-                _loss, out = self.model(*inputs)  # out:batch,num_polar
+                _loss, out, target = self.model(*inputs)  # out:batch,num_polar
                 loss.append(_loss.item())
-                t_targets, t_outputs = batch['target'].to(self.device), out.argmax(dim=-1)  # batch
+                t_targets, t_outputs = target, out.argmax(dim=-1)  # batch
                 n_correct += (t_outputs == t_targets).sum().item()
                 n_total += len(t_outputs)
 
@@ -328,7 +342,7 @@ class Instructor:
             self.model.train()
             self.optimizer.zero_grad()
             inputs = [batch[col].to(self.device) for col in self.inputs_cols]
-            loss, out = self.model(*inputs, mode=mode)
+            loss, out ,target= self.model(*inputs, mode=mode)
             loss.backward()
             self.optimizer.step()
 
@@ -336,8 +350,7 @@ class Instructor:
             if mode == 'unlabeled': continue  # skip eval
             # loss,acc on train , 1 step 1 show
             percent = 100 * (step % label_steps) / label_steps
-            targets = batch['target'].to(self.device)
-            n_correct += (torch.argmax(out, -1) == targets).sum().item()
+            n_correct += (torch.argmax(out, -1) == target).sum().item()
             n_total += len(out)
             loss_total += loss.item()
 
@@ -464,9 +477,10 @@ if __name__ == '__main__':
     ps = {
         # 'threshould': list(range(3,20,3)),
         # 'weight_keep': [True] * 3 + [False] * 3,
-        # 'batch_size': [32, 64, 128],
+        # 'batch_size': [64],
         # 'mask_ratio': [x / 10 for x in range(0, 11)]
-        'initailizer': ["xavier_uniform_", "xavier_normal_"] * 3
+        # 'seed': [280, 1157, 1168, 995, 544],
+        # 'initailizer': ["xavier_uniform_", "xavier_normal_"] * 3
     }
 
     # parameter_explore(opt_semi_res.set({'valid_ratio': 0.5}), ps)

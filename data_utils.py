@@ -482,6 +482,7 @@ class ABSADataset(Dataset):
                 for i in range(len(val['polarity'])):
                     data_item = data_meta.copy()
                     data_item['target'] = val['polarity'][i]
+                    data_item['polarity'] = val['polarity'][i]
                     data_item['text_indices'] = val['text_indices'][i]
                     data_item['position_indices'] = val['position_indices'][i]
                     data_item['aspect_indices'] = val['aspect_indices'][i]
@@ -733,13 +734,13 @@ if __name__ == '__main__':
     # da.augmentation()
 
     # labeled
-    # ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
-    # ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
-    # ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
-    # ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
+    ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
+    ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
+    ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
+    ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
     # unlabeled
-    # ABSADataset(fname='data/unlabeled/formated_electronic.txt', tokenizer=tokenizer)
-    # ABSADataset(fname='data/unlabeled/formated_yelp_review.txt', tokenizer=tokenizer)
+    ABSADataset(fname='data/unlabeled/formated_electronic.txt', tokenizer=tokenizer)
+    ABSADataset(fname='data/unlabeled/formated_yelp_review.txt', tokenizer=tokenizer)
     # eda
     # eda_lap=ABSADataset(fname='data/eda/eda_Laptops_Train.xml.seg', tokenizer=tokenizer)
     # eda_res=ABSADataset(fname='data/eda/eda_Restaurants_Train.xml.seg', tokenizer=tokenizer)

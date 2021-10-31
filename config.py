@@ -24,11 +24,13 @@ PARAMETERS = {
     'semi_supervised': False,
     'clear_model': True,  # clear saved models before run ,prevent load
     'max_seq_len': 85,
-    'valid_ratio': 0,
+    'valid_ratio': 0.1,
     'dataset': 'laptop',
     "save_model_name": '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl',
     # eval
     'eval_times': 10,
+    # reproduce
+    'seed': 544,
     # optimzer
     'semi_lr': 1e-3,
     'semi_l2': 5e-3,

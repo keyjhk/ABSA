@@ -32,7 +32,7 @@ class CVTModel(nn.Module):
             'context_indices', 'pos_indices', 'polar_indices',
             'text_indices', 'position_indices',
             'aspect_indices', 'aspect_boundary',
-            'target',
+            'polarity',
             'len_s',
         ]
 
@@ -89,7 +89,7 @@ class CVTModel(nn.Module):
         position_indices = inputs[self.inputs_cols.index('position_indices')]  # batch,MAX_LEN
         aspect_indices = inputs[self.inputs_cols.index('aspect_indices')]  # batch,MAX_LEN
         aspect_boundary = inputs[self.inputs_cols.index('aspect_boundary')]  # batch,2
-        target = inputs[self.inputs_cols.index('target')]  # batch
+        polarity = inputs[self.inputs_cols.index('polarity')]  # batch
         len_x = inputs[self.inputs_cols.index('len_s')]  # batch
 
         # word/polar/pos/position # batch,MAX_LEN,word_embed_dim
@@ -128,8 +128,8 @@ class CVTModel(nn.Module):
 
             # docoder primary
             out = self.primary(uni_primary, uni_hidden)
-            loss = self.loss(out, target)
-            return loss, out
+            loss = self.loss(out, polarity)
+            return loss, out, polarity
         elif mode == "unlabeled":  # 无监督训练
             self._freeze_model()
             label_primary = self.primary(uni_primary, uni_hidden)  # batch,num_polar
@@ -147,7 +147,7 @@ class CVTModel(nn.Module):
             # loss = loss_mask
             loss = loss_weight
 
-            return loss, label_primary
+            return loss, label_primary,polarity
 
     def dynamic_features(self, features, position_indices, len_x,
                          kind='mask'):
