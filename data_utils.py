@@ -322,8 +322,9 @@ class ABSADataset(Dataset):
         self.all_data = {}  #
         self.data = []  # for iterater
         self.statistic_data = {
-            'sentences': None,  # int
-            "aspect": None,  # set
+            'sentences': 0,
+            'avg_length': 0,
+            "aspect": set(),
             "polar_count": None  # {pos:int,neg:int,neu:int}
         }
         # dataset name
@@ -346,9 +347,10 @@ class ABSADataset(Dataset):
         self.show_dataset()
 
     def show_dataset(self):
-        print('dataset:[{}] \nsentences:{} aspects:{} polars:[{}]\n'.format(
+        print('dataset:[{}] \nsentences:{} avg_len:{} aspects:{} polars:[{}]\n'.format(
             self.dataset_name,
             self.statistic_data['sentences'],
+            self.statistic_data['avg_length'],
             len(self.statistic_data['aspect']),
             self.statistic_data['polar_count']))
 
@@ -553,6 +555,7 @@ class ABSADataset(Dataset):
         data = self.all_data
 
         sentences = 0
+        sent_length = 0
         aspects = set()
         polar_count = {}.fromkeys(tokenizer.polar2idx.keys(), 0)
 
@@ -568,14 +571,16 @@ class ABSADataset(Dataset):
                     polar_count[polar] = polar_count.get(polar) + 1
 
             sentences += 1
+            sent_length += len(words)
 
         self.statistic_data['sentences'] = sentences
+        self.statistic_data['avg_length'] = sent_length // sentences
         self.statistic_data['aspect'] = aspects
         self.statistic_data['polar_count'] = polar_count
 
     def union(self, dataset):
-        print('union [{}] and [{}]'.format(self.dataset_name,dataset.dataset_name))
-        self.dataset_name = "{}_{}".format(self.dataset_name,dataset.dataset_name)
+        print('union [{}] and [{}]'.format(self.dataset_name, dataset.dataset_name))
+        self.dataset_name = "{}_{}".format(self.dataset_name, dataset.dataset_name)
         self.all_data.update(dataset.all_data)
         self.data.extend(dataset.data)
         self.statistic()
@@ -719,9 +724,8 @@ if __name__ == '__main__':
     # ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
     # ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
     # unlabeled
-    # ABSADataset(fname='data/unlabeled/formated_electronic.txt', tokenizer=tokenizer, write_file=True)
-    # ABSADataset(fname='data/unlabeled/formated_yelp_review.txt', tokenizer=tokenizer, write_file=True)
+    # ABSADataset(fname='data/unlabeled/formated_electronic.txt', tokenizer=tokenizer)
+    # ABSADataset(fname='data/unlabeled/formated_yelp_review.txt', tokenizer=tokenizer)
     # eda
     # eda_lap=ABSADataset(fname='data/eda/eda_Laptops_Train.xml.seg', tokenizer=tokenizer)
     # eda_res=ABSADataset(fname='data/eda/eda_Restaurants_Train.xml.seg', tokenizer=tokenizer)
-

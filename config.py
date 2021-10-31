@@ -21,7 +21,7 @@ PARAMETERS = {
     'patience': 10,  # how many epoches does't increase then stop train
     'semi_patience': 30,
     'batch_size': 32,
-    'semi_supervised': True,
+    'semi_supervised': False,
     'clear_model': True,  # clear saved models before run ,prevent load
     'max_seq_len': 85,
     'valid_ratio': 0,
@@ -38,11 +38,12 @@ PARAMETERS = {
     "word_embedding_size": 300,
     "pos_embedding_size": 50,
     "polar_embedding_size": 50,
-    "position_embedding_size": 50,  # 50 100 300
+    "position_embedding_size": 50,
     "encoder_hidden_size": 300,
     # dynamic mask/weight
     "threshould": 4,
     'mask_ratio': 0.5,
+    'weight_keep':False
 
 }
 

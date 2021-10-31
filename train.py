@@ -1,11 +1,12 @@
-import re
+from time import strftime, localtime
 import logging
 
 import torch.nn as nn
 import torch.optim as optim
-from time import strftime, localtime
 from sklearn import metrics
 from torch.utils.data import random_split, DataLoader
+
+import matplotlib.pyplot as plt
 
 from data_utils import *
 from models.cvt_model import CVTModel
@@ -37,6 +38,12 @@ class Option:
 
     def __len__(self):
         return len(self.option)
+
+    def __add__(self, other):
+        assert isinstance(other, Option)
+        _opt = self.option.copy()
+        _opt.update(other.option)
+        return Option(_opt, name=self.name + '_' + other.name)
 
     def __getattr__(self, item):
         try:
@@ -79,7 +86,6 @@ class Instructor:
         # init
         self.init_dataset()
         self.init_model()
-        self.loss = nn.CrossEntropyLoss()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
         if self.semi_supervised:
             # 1e-3过拟合 5e-3 欠拟
@@ -143,7 +149,7 @@ class Instructor:
         self.trainloader = DataLoader(dataset=trainset, batch_size=batch_size, shuffle=True)
         self.validloader = DataLoader(dataset=validset, batch_size=batch_size, shuffle=True)
         self.testloader = DataLoader(dataset=testset, batch_size=batch_size, shuffle=True)
-        unlabeled_loader = DataLoader(dataset=unlabelset, batch_size=batch_size, shuffle=True)
+        unlabeled_loader = DataLoader(dataset=unlabelset, batch_size=batch_size)  # not shuffle
 
         self.mixloader = MixDataLoader(labeled_loader=self.trainloader,
                                        unlabeld_loader=unlabeled_loader, semi_supervised=self.semi_supervised)
@@ -164,7 +170,8 @@ class Instructor:
                               encoder_hidden_size=opt.encoder_hidden_size,
                               # dynamic mask/weight
                               threshould=opt.threshould,
-                              mask_ratio=opt.mask_ratio
+                              mask_ratio=opt.mask_ratio,
+                              weight_keep=opt.weight_keep
                               ).to(self.device)
         self.model_name = self.model.name
         self.inputs_cols = self.model.inputs_cols
@@ -220,7 +227,11 @@ class Instructor:
         f1 = metrics.f1_score(t_targets_all.cpu(), t_outputs_all.cpu(), labels=[0, 1, 2],
                               average='macro')
         loss = sum(loss) / len(loss)
-        return acc * 100, f1 * 100, loss
+
+        acc = round(acc * 100, 2)
+        f1 = round(f1 * 100, 2)
+        loss = round(loss, 4)
+        return acc, f1, loss
 
     def save(self, model, epoch, acc, f1):
         save_model_name = self.save_model_name
@@ -283,12 +294,14 @@ class Instructor:
             acc += _acc
             f1 += _f1
             loss += _loss
-        acc /= times
-        f1 /= times
-        loss /= times
+        acc = round(acc / times, 2)
+        f1 = round(f1 / times, 2)
+        loss = round(loss / times, 4)
+
+        eval_res = {'loss': loss, 'acc': acc, 'f1': f1}
         self.logger.info('TEST EVAL'.center(30, '='))
-        self.logger.info('loss:{:.4f} acc:{:.2f}% f1:{:2f}'.format(loss, acc, f1))
-        return 'loss:{:.4f} acc:{:.2f}% f1:{:2f}'.format(loss, acc, f1)
+        self.logger.info(str(eval_res))
+        return eval_res
 
     def run(self):
         self.logger.info('run models'.center(30, '='))
@@ -336,7 +349,7 @@ class Instructor:
             # evaluate in valid
             if step % (print_every * label_steps) == 0:
                 acc, f1, loss = self._evaluate_acc_f1(self.validloader)
-                info = 'epoch:{} loss:{:.4f} acc:{:.2f}% f1:{:2f} '.format(epoch, loss, acc, f1)
+                info = 'epoch:{} loss:{} acc:{}% f1:{} '.format(epoch, loss, acc, f1)
                 print('=' * 30,
                       '\nVALID EVAL\n',
                       info + '\n',
@@ -373,6 +386,24 @@ def set_logger(name=None, file=None, level=logging.INFO):
     return logger
 
 
+def plot(x, y, xlabel='', ylabel='', title=''):
+    # x :[]  y
+
+    plt.xlabel(xlabel)
+    plt.xlabel(ylabel)
+    title = title if title else '{}-{}-'.format(ylabel, xlabel)
+    title += strftime("%m%d-%H%M%S", localtime())
+    plt.title(title)
+    plt.plot(x, y, marker='o')
+
+    # annotate
+    for px, py in zip(x, y):
+        plt.annotate(text=str(py), xy=(px, py), xytext=(px, py + 0.1))
+
+    plt.savefig('state/figures/{}.png'.format(title))
+    plt.show()
+
+
 def parameter_explore(opt, par_vals):
     # par_vals:{p:[],...}
     name = 'p'
@@ -385,63 +416,52 @@ def parameter_explore(opt, par_vals):
         pv = 'parameters_{}{}-{}'.format(p, values[0], values[-1])
         results = []
         logger.info(pv.center(30, '*'))
-        for v in values:
+        for i, v in enumerate(values):
             _opt = opt.set({
                 p: v
-            }, opt.name + '_{}_{}'.format(p, v))
+            }, opt.name + '_{}[{}]_{}'.format(p, i, v)) # pi:vi
             _ins = Instructor(_opt)
-            res = _ins.run()
+            # res = _ins.run()
+            res= ''
             results.append((v, res))
-            logger.info('[{}:{}] :{}'.format(p, v,res).center(30, '='))
+            logger.info('[{}:{}] :{}'.format(p, v, res).center(30, '='))  # show each run
 
+        # finished
+        logger.info('=' * 30)
         for v, r in results:
             logger.info('[{}]={} [res]:{}'.format(p, v, r))
+        # plot
+        plot(x=values, y=[res['acc'] for _, res in results],
+             xlabel=p, ylabel='acc',
+             title=pv + '+' + opt.name)
         logger.info('*' * 30)
 
 
-def main():
-    instrutor = Instructor(opt_su_res)
-    # instrutor = Instructor(opt_su_lap)
-    # instrutor = Instructor(opt_semi_res)
-    # instrutor = Instructor(opt_semi_lap)
-
+def main(opt):
+    instrutor = Instructor(opt)
     instrutor.run()
 
 
 if __name__ == '__main__':
     opt = Option(PARAMETERS)
+
     # supervised
-    opt_su_res = opt.set({
-        'semi_supervised': False,
-        'dataset': 'restaurant'
-    }, name='sup_res')
-
-    opt_su_lap = opt.set({
-        'semi_supervised': False,
-        'dataset': 'laptop'
-    }, name='sup_lap')
+    opt_res = opt.set({'dataset': 'restaurant'}, name='res')  # default supervised
+    opt_lap = opt.set({'dataset': 'laptop'}, name='lap')
     # semi_supervised
-    opt_semi_res = opt.set({
-        'semi_supervised': True,
-        'dataset': 'restaurant'
-    }, name='semi_res')
-
-    opt_semi_lap = opt.set({
-        'semi_supervised': True,
-        'dataset': 'laptop'
-    }, name='semi_lap')
+    opt_semi_res = opt.set({'dataset': 'restaurant', 'semi_supervised': True}, name='semi_res')
+    opt_semi_lap = opt.set({'dataset': 'laptop', 'semi_supervised': True}, name='semi_lap')
 
     # p
     ps = {
-        'threshould': list(range(3, 20))
+        # 'threshould': list(range(3,20,3)),
+        'weight_keep': [True] * 3 + [False] * 3
+        # 'mask_ratio': [x / 10 for x in range(0, 11)]
     }
 
-    # parameter_explore(opt_semi_res.set({
+    # parameter_explore(opt_semi_res.set({'valid_ratio': 0.5}), ps)
+    parameter_explore(opt_semi_lap.set({'valid_ratio': 0.5}), ps)
+
+    # main(opt_su_res.set({
     #     'valid_ratio': 0.5
-    # }),ps)
-
-    parameter_explore(opt_semi_lap.set({
-        'valid_ratio': 0.5
-    }), ps)
-
-    # main()
+    # }))
