@@ -134,13 +134,15 @@ def pad_and_truncate(sequence, maxlen, value=0, dtype='int64'):
     return x
 
 
-def build_tokenizer(max_seq_len, dat_fname='state/tokenizer.pkl', unlabeled=True):
+def build_tokenizer(max_seq_len, dat_fname='state/tokenizer.pkl',
+                    mini_freq=1,
+                    unlabeled=True):
     if os.path.exists(dat_fname):
         print('loading tokenizer:', dat_fname)
         tokenizer = pickle.load(open(dat_fname, 'rb'))
     else:
         fnames = LABELED_FILES + UNLABELED_FILES if unlabeled else LABELED_FILES
-        tokenizer = Tokenizer(max_seq_len, fnames=fnames)
+        tokenizer = Tokenizer(max_seq_len, fnames=fnames, mini_freq=mini_freq)
         pickle.dump(tokenizer, open(dat_fname, 'wb'))
 
     print('vocab size:{}'.format(len(tokenizer.word2idx)))
@@ -200,20 +202,15 @@ def get_similar_tokens(query_token, embed_matrix, tokenizer, k=3):
 
 
 class Tokenizer(object):
-    def __init__(self, max_seq_len, fnames, special_tokens=True):
+    def __init__(self, max_seq_len, fnames, mini_freq):
         self.max_seq_len = max_seq_len
         self.sentidict = SentiWordNet()
         self.max_seq_len = max_seq_len
+        self.mini_freq = mini_freq
+        self.word_count = {}
         self.word2idx = {}
         self.idx2word = {}
         self.idx = 0
-
-        # special tokens
-        if special_tokens:
-            for token in SPECIAL_TOKENS:
-                self.word2idx[token] = self.idx
-                self.idx2word[self.idx] = token
-                self.idx += 1
 
         # POS vocab
         # verb noun adj adverb other
@@ -228,6 +225,8 @@ class Tokenizer(object):
         for fname in fnames:
             for text in self.read_text(fname):
                 self.fit_on_text(text)
+        # build
+        self.build_vocab()
 
     def read_text(self, fname):
         with open(fname, 'r', encoding='utf-8') as f:
@@ -244,13 +243,26 @@ class Tokenizer(object):
                     break
             print('read {} sentences from {}'.format(ctr, fname))
 
+    def build_vocab(self):
+        mini_freq = self.mini_freq
+        tokens = filter(lambda k: self.word_count[k] >= mini_freq, self.word_count.keys())
+        tokens = list(tokens)
+        print('trimmed {} tokens'.format(len(self.word_count) - len(tokens)))
+        tokens = SPECIAL_TOKENS + tokens
+        # special tokens
+        for token in tokens:
+            self.word2idx[token] = self.idx
+            self.idx2word[self.idx] = token
+            self.idx += 1
+
     def fit_on_text(self, text):
         words = self.tokenize(text)
         for word in words:
-            if word not in self.word2idx:
-                self.word2idx[word] = self.idx
-                self.idx2word[self.idx] = word
-                self.idx += 1
+            self.word_count[word] = self.word_count.get(word, 0) + 1
+            # if word not in self.word2idx:
+            #     self.word2idx[word] = self.idx
+            #     self.idx2word[self.idx] = word
+            #     self.idx += 1
 
     def tokenize(self, text, islower=True):
         return text.lower().split() if islower else text.split()
@@ -710,7 +722,9 @@ class DataAug:
 
 
 if __name__ == '__main__':
-    # build
+    # if the tokenizer rebuild ,the embedding matrix should rebuilf too
+    # because the word:idx map has changed ,but the embeding matrix may
+    # reload from the disk
     tokenizer = build_tokenizer(max_seq_len=MAX_SEQ_LEN)
     embed_matrix = build_embedding_matrix(tokenizer.word2idx)
 

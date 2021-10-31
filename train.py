@@ -178,6 +178,12 @@ class Instructor:
         self._reset_params()
 
     def _reset_params(self):
+        initializers = {
+            'xavier_uniform_': torch.nn.init.xavier_uniform_,
+            'xavier_normal_': torch.nn.init.xavier_normal_,
+            'orthogonal_': torch.nn.init.orthogonal_,
+        }
+        initailizer = initializers[opt.initializer]
         print('reset params:'.center(30, '='))
         for name, p in self.model.named_parameters():
             if 'word_embedding' in name:
@@ -185,8 +191,7 @@ class Instructor:
                 continue
             if p.requires_grad:
                 if len(p.shape) > 1:
-                    # torch.nn.init.xavier_uniform_(p)
-                    torch.nn.init.xavier_normal_(p)
+                    initailizer(p)
                 else:
                     stdv = 1. / math.sqrt(p.shape[0])
                     torch.nn.init.uniform_(p, a=-stdv, b=stdv)
@@ -419,21 +424,24 @@ def parameter_explore(opt, par_vals):
         for i, v in enumerate(values):
             _opt = opt.set({
                 p: v
-            }, opt.name + '_{}[{}]_{}'.format(p, i, v)) # pi:vi
+            }, opt.name + '_{}[{}]_{}'.format(p, i, v))  # pi:vi
             _ins = Instructor(_opt)
-            # res = _ins.run()
-            res= ''
+            res = _ins.run()
             results.append((v, res))
+
             logger.info('[{}:{}] :{}'.format(p, v, res).center(30, '='))  # show each run
 
         # finished
         logger.info('=' * 30)
         for v, r in results:
             logger.info('[{}]={} [res]:{}'.format(p, v, r))
-        # plot
-        plot(x=values, y=[res['acc'] for _, res in results],
-             xlabel=p, ylabel='acc',
-             title=pv + '+' + opt.name)
+        try:
+            # plot
+            x = [float(v) for v in values]
+            y = [res['acc'] for _, res in results]
+            plot(x=x, y=y, xlabel=p, ylabel='acc', title=pv + '+' + opt.name)
+        except Exception:
+            pass
         logger.info('*' * 30)
 
 
@@ -455,13 +463,17 @@ if __name__ == '__main__':
     # p
     ps = {
         # 'threshould': list(range(3,20,3)),
-        'weight_keep': [True] * 3 + [False] * 3
+        # 'weight_keep': [True] * 3 + [False] * 3,
+        # 'batch_size': [32, 64, 128],
         # 'mask_ratio': [x / 10 for x in range(0, 11)]
+        'initailizer': ["xavier_uniform_", "xavier_normal_"] * 3
     }
 
     # parameter_explore(opt_semi_res.set({'valid_ratio': 0.5}), ps)
-    parameter_explore(opt_semi_lap.set({'valid_ratio': 0.5}), ps)
+    # parameter_explore(opt_semi_lap.set({'valid_ratio': 0.5}), ps)
+    # parameter_explore(opt_res, ps)
+    parameter_explore(opt_lap, ps)
 
-    # main(opt_su_res.set({
-    #     'valid_ratio': 0.5
-    # }))
+    # main(opt_res.set({'valid_ratio': 0.5}))
+    # main(opt_res)
+    # main(opt_lap)
