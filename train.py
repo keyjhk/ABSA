@@ -392,7 +392,7 @@ def parameter_explore(opt, par_vals):
             _ins = Instructor(_opt)
             res = _ins.run()
             results.append((v, res))
-            logger.info('[{}:{}] :{}'.format(p, v,res).center(30, '='))
+            logger.info('[{}:{}] :{}'.format(p, v, res).center(30, '='))
 
         for v, r in results:
             logger.info('[{}]={} [res]:{}'.format(p, v, r))
@@ -444,4 +444,5 @@ if __name__ == '__main__':
         'valid_ratio': 0.5
     }), ps)
 
-    # main()
+
+    main()
