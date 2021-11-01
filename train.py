@@ -492,15 +492,15 @@ if __name__ == '__main__':
         # 'batch_size': [64],
         # 'lr': [1e-4,1e-5],
         # 'l2': [1e-2, 5e-3],
-        'patience':range(10,40,5),
+        # 'patience':range(10,40,5),
         # 'pos_embedding_size':range(50,350,50),  # 50
         # 'threshould': list(range(3,30,5)),
-        # 'encoder_hidden_size':[128,256,300,512]
-        # 'mask_ratio': [x / 10 for x in range(0, 11)]
+        # 'encoder_hidden_size':[128,256,300,512],
+        'mask_ratio': [x / 10 for x in range(1, 10,2)]
     }
 
-    parameter_explore(opt, ps)  # supervised
-    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi
+    # parameter_explore(opt, ps)  # supervised
+    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi
 
     # main(opt_res.set({'valid_ratio': 0.5}))
     # main(opt_res)

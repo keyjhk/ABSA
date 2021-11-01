@@ -65,7 +65,7 @@ class CVTModel(nn.Module):
 
         # auxiliary
         self.primary_full = self.primary.clone('full')
-        self.primary_mask = self.primary.clone('mask')  # p=0.5
+        self.primary_mask = self.primary.clone('mask',mask_ratio)  # p=0.5
         self.primary_weight = self.primary.clone('weight')
 
         # location decoder
@@ -137,15 +137,16 @@ class CVTModel(nn.Module):
             label_primary = label_primary.detach()
             # auxiliary1
             # out_mask = self.primary_mask(uni_mask, uni_hidden)  # batch,num_polar
-            # loss_mask = F.kl_div(out_mask.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+            out_mask = self.primary_mask(uni_primary, uni_hidden)  # batch,num_polar
+            loss_mask = F.kl_div(out_mask.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
             # out_full = self.primary_full(uni_primary, uni_hidden)
             # loss_full = F.kl_div(out_full.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
-            out_weight = self.primary_weight(uni_weight, uni_hidden)
-            loss_weight = F.kl_div(out_weight.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
-            # loss = loss_mask
-            loss = loss_weight
+            # out_weight = self.primary_weight(uni_weight, uni_hidden)
+            # loss_weight = F.kl_div(out_weight.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+            loss = loss_mask
+            # loss = loss_weight
 
             return loss, label_primary,polarity
 
