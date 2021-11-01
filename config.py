@@ -20,7 +20,7 @@ PARAMETERS = {
     'step_every': 0.1,  # 0<x<1 ,show progress when achieved
     'patience': 10,  # how many epoches does't increase then stop train
     'semi_patience': 30,
-    'batch_size': 32,
+    'batch_size': 64,
     'semi_supervised': False,
     'clear_model': True,  # clear saved models before run ,prevent load
     'max_seq_len': 85,
@@ -34,7 +34,7 @@ PARAMETERS = {
     # optimzer
     'semi_lr': 1e-3,
     'semi_l2': 5e-3,
-    'lr': 1e-3,
+    'lr': 1,
     'l2': 1e-2,
     # reset:
     "initializer": "xavier_uniform_",

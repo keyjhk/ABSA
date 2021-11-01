@@ -91,13 +91,11 @@ class Instructor:
         self.init_model()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
         if self.semi_supervised:
-            # 1e-3过拟合 5e-3 欠拟
             self.patience = opt.patience
-            self.optimizer = optim.Adam(_params, lr=opt.lr, weight_decay=opt.l2)
-        else:
-            # 1e-3过拟合 原1e-2
-            self.patience = opt.semi_patience
             self.optimizer = optim.Adam(_params, lr=opt.semi_lr, weight_decay=opt.semi_l2)
+        else:
+            self.patience = opt.semi_patience
+            self.optimizer = optim.Adam(_params, lr=opt.lr, weight_decay=opt.l2)
         # logger
         self.logger = self.set_logger()
 
@@ -117,6 +115,7 @@ class Instructor:
             len(self.trainset), len(self.validset), len(self.unlabeledset), len(self.testset)
         )
         self.logger.info(dataset_info)
+        self.logger.info(self.optimizer)
         self.logger.info('=' * 30)
 
     def reproduce(self):
@@ -342,7 +341,7 @@ class Instructor:
             self.model.train()
             self.optimizer.zero_grad()
             inputs = [batch[col].to(self.device) for col in self.inputs_cols]
-            loss, out ,target= self.model(*inputs, mode=mode)
+            loss, out, target = self.model(*inputs, mode=mode)
             loss.backward()
             self.optimizer.step()
 
@@ -430,6 +429,7 @@ def parameter_explore(opt, par_vals):
 
     logger = set_logger(name='parameter_explore',
                         file='{}_{}.log'.format(name, strftime("%m%d-%H%M", localtime())))
+    search_results=[]
     for p, values in par_vals.items():
         pv = 'parameters_{}{}-{}'.format(p, values[0], values[-1])
         results = []
@@ -447,7 +447,9 @@ def parameter_explore(opt, par_vals):
         # finished
         logger.info('=' * 30)
         for v, r in results:
-            logger.info('[{}]={} [res]:{}'.format(p, v, r))
+            vr='[{}]={} [res]:{}'.format(p, v, r)
+            logger.info(vr)
+            search_results.append(vr)
         try:
             # plot
             x = [float(v) for v in values]
@@ -456,6 +458,11 @@ def parameter_explore(opt, par_vals):
         except Exception:
             pass
         logger.info('*' * 30)
+
+    logger.info('finnal results'.center(30,'*'))
+    for r in search_results:
+        logger.info(r)
+    logger.info('finnal results'.center(30,'*'))
 
 
 def main(opt):
@@ -478,9 +485,10 @@ if __name__ == '__main__':
         # 'threshould': list(range(3,20,3)),
         # 'weight_keep': [True] * 3 + [False] * 3,
         # 'batch_size': [64],
+        'lr': [1e-3,1e-4,1e-5],
+        # 'l2':[]
         # 'mask_ratio': [x / 10 for x in range(0, 11)]
         # 'seed': [280, 1157, 1168, 995, 544],
-        # 'initailizer': ["xavier_uniform_", "xavier_normal_"] * 3
     }
 
     # parameter_explore(opt_semi_res.set({'valid_ratio': 0.5}), ps)
