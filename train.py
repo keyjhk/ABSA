@@ -91,10 +91,10 @@ class Instructor:
         self.init_model()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
         if self.semi_supervised:
-            self.patience = opt.patience
+            self.patience = opt.semi_patience
             self.optimizer = optim.Adam(_params, lr=opt.semi_lr, weight_decay=opt.semi_l2)
         else:
-            self.patience = opt.semi_patience
+            self.patience = opt.patience
             self.optimizer = optim.Adam(_params, lr=opt.lr, weight_decay=opt.l2)
         # logger
         self.logger = self.set_logger()
@@ -421,7 +421,7 @@ def plot(x, y, xlabel='', ylabel='', title=''):
     plt.show()
 
 
-def parameter_explore(opt, par_vals):
+def parameter_explore(opt, par_vals, isplot=True, datasets=None):
     # par_vals:{p:[],...}
     name = 'p'
     for p in par_vals.keys():
@@ -429,40 +429,46 @@ def parameter_explore(opt, par_vals):
 
     logger = set_logger(name='parameter_explore',
                         file='{}_{}.log'.format(name, strftime("%m%d-%H%M", localtime())))
-    search_results=[]
-    for p, values in par_vals.items():
-        pv = 'parameters_{}{}-{}'.format(p, values[0], values[-1])
-        results = []
-        logger.info(pv.center(30, '*'))
-        for i, v in enumerate(values):
-            _opt = opt.set({
-                p: v
-            }, opt.name + '_{}[{}]_{}'.format(p, i, v))  # pi:vi
-            _ins = Instructor(_opt)
-            res = _ins.run()
-            results.append((v, res))
+    datasets = ['restaurant', 'laptop'] if datasets is None else datasets
+    search_results = {d: [] for d in datasets}
+    for dataset in datasets:
+        for p, values in par_vals.items():
+            pv = 'parameters_{}{}-{}_{}'.format(p, values[0], values[-1],dataset)
+            results = []
+            logger.info(pv.center(30, '*'))
+            for i, v in enumerate(values):
+                _opt = opt.set({
+                    p: v,
+                    'dataset': dataset,
+                }, opt.name + '_{}[{}]_{}_{}'.format(p, i, v,dataset))  # pi:vi
 
-            logger.info('[{}:{}] :{}'.format(p, v, res).center(30, '='))  # show each run
+                _ins = Instructor(_opt)
+                res = _ins.run()
+                results.append((v, res))
 
-        # finished
-        logger.info('=' * 30)
-        for v, r in results:
-            vr='[{}]={} [res]:{}'.format(p, v, r)
-            logger.info(vr)
-            search_results.append(vr)
-        try:
-            # plot
-            x = [float(v) for v in values]
-            y = [res['acc'] for _, res in results]
-            plot(x=x, y=y, xlabel=p, ylabel='acc', title=pv + '+' + opt.name)
-        except Exception:
-            pass
-        logger.info('*' * 30)
+                logger.info('[{}:{}] :{}'.format(p, v, res).center(30, '='))  # show each run
 
-    logger.info('finnal results'.center(30,'*'))
-    for r in search_results:
-        logger.info(r)
-    logger.info('finnal results'.center(30,'*'))
+            # finished in one dataset
+            logger.info('=' * 30)
+            for v, r in results:
+                vr = '[{}]={} [res]:{}'.format(p, v, r)
+                logger.info(vr)
+                search_results[dataset].append(vr)
+            logger.info('*' * 30)
+            if isplot:
+                try:
+                    # plot
+                    x = [float(v) for v in values]
+                    y = [res['acc'] for _, res in results]
+                    plot(x=x, y=y, xlabel=p, ylabel='acc', title=pv + '+' + opt.name)
+                except Exception:
+                    pass
+
+    logger.info('finnal results'.center(30, '*'))
+    for d, res in search_results.items():
+        res = '\n'.join(['dataset:{} result:{}'.format(d, r) for r in res])
+        logger.info(res)
+    logger.info('*' * 30)
 
 
 def main(opt):
@@ -482,19 +488,19 @@ if __name__ == '__main__':
 
     # p
     ps = {
-        # 'threshould': list(range(3,20,3)),
         # 'weight_keep': [True] * 3 + [False] * 3,
         # 'batch_size': [64],
-        'lr': [1e-3,1e-4,1e-5],
-        # 'l2':[]
+        # 'lr': [1e-4,1e-5],
+        # 'l2': [1e-2, 5e-3],
+        'patience':range(10,40,5),
+        # 'pos_embedding_size':range(50,350,50),  # 50
+        # 'threshould': list(range(3,30,5)),
+        # 'encoder_hidden_size':[128,256,300,512]
         # 'mask_ratio': [x / 10 for x in range(0, 11)]
-        # 'seed': [280, 1157, 1168, 995, 544],
     }
 
-    # parameter_explore(opt_semi_res.set({'valid_ratio': 0.5}), ps)
-    # parameter_explore(opt_semi_lap.set({'valid_ratio': 0.5}), ps)
-    # parameter_explore(opt_res, ps)
-    parameter_explore(opt_lap, ps)
+    parameter_explore(opt, ps)  # supervised
+    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi
 
     # main(opt_res.set({'valid_ratio': 0.5}))
     # main(opt_res)

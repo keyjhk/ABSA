@@ -28,13 +28,13 @@ PARAMETERS = {
     'dataset': 'laptop',
     "save_model_name": '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl',
     # eval
-    'eval_times': 10,
+    'eval_times': 3,  # 10
     # reproduce
     'seed': 544,
     # optimzer
     'semi_lr': 1e-3,
     'semi_l2': 5e-3,
-    'lr': 1,
+    'lr': 5e-3,
     'l2': 1e-2,
     # reset:
     "initializer": "xavier_uniform_",
