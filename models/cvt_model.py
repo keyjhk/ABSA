@@ -21,13 +21,14 @@ class CVTModel(nn.Module):
                  encoder_hidden_size,
                  # dynamic features
                  threshould,
+                 drop_attention,
                  mask_ratio,
                  weight_keep,
                  mode='labeled',
                  ):
 
         super().__init__()
-        # inputs cols: 和 forward所传参数顺序一致
+
         self.inputs_cols = [
             'context_indices', 'pos_indices', 'polar_indices',
             'text_indices', 'position_indices',
@@ -65,7 +66,8 @@ class CVTModel(nn.Module):
 
         # auxiliary
         self.primary_full = self.primary.clone('full')
-        self.primary_mask = self.primary.clone('mask',mask_ratio)  # p=0.5
+        self.mask_weak = self.primary.clone('mask_weak', drop_attention)
+        self.mask_strong = self.primary.clone('mask_strong')
         self.primary_weight = self.primary.clone('weight')
 
         # location decoder
@@ -135,20 +137,22 @@ class CVTModel(nn.Module):
             label_primary = self.primary(uni_primary, uni_hidden)  # batch,num_polar
 
             label_primary = label_primary.detach()
-            # auxiliary1
-            # out_mask = self.primary_mask(uni_mask, uni_hidden)  # batch,num_polar
-            out_mask = self.primary_mask(uni_primary, uni_hidden)  # batch,num_polar
-            loss_mask = F.kl_div(out_mask.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+            # mask strong
+            out_ms = self.mask_strong(uni_mask, uni_hidden)  # batch,num_polar
+            loss_ms = F.kl_div(out_ms.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
-            # out_full = self.primary_full(uni_primary, uni_hidden)
-            # loss_full = F.kl_div(out_full.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+            # mask weak
+            out_mw = self.primary_mask(uni_primary, uni_hidden)  # batch,num_polar
+            loss_mw = F.kl_div(out_mw.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
+            # dynamic weight
             # out_weight = self.primary_weight(uni_weight, uni_hidden)
             # loss_weight = F.kl_div(out_weight.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
-            loss = loss_mask
+
+            loss = loss_ms
             # loss = loss_weight
 
-            return loss, label_primary,polarity
+            return loss, label_primary, polarity
 
     def dynamic_features(self, features, position_indices, len_x,
                          kind='mask'):
@@ -179,7 +183,8 @@ class CVTModel(nn.Module):
             return features * mask_r  # batch,seq,hidden_size
         elif kind == 'weight':
             # dynamic weight decay
-            weight = (1 - torch.div(position_indices, max_seq_len)).to(device)  # batch,MAX_LEN ; MAX_LEN = 85
+            # weight = (1 - torch.div(position_indices, max_seq_len)).to(device)  # batch,MAX_LEN ; MAX_LEN = 85
+            weight = 0.5 * (1 - torch.div(position_indices, len_x.unsqueeze(1))).to(device)  # batch,MAX_LEN
             if weight_keep:
                 weight = weight.masked_fill(position_indices <= window_size, 1)  # keep 1
             weight = weight[:, :max_x].unsqueeze(dim=2)  # batch,seq_len ,1

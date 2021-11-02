@@ -15,11 +15,11 @@ PARAMETERS = {
         }
     },
     # train
-    'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',
     'print_every': 1,
     'step_every': 0.1,  # 0<x<1 ,show progress when achieved
     'patience': 10,  # how many epoches does't increase then stop train
-    'semi_patience': 30,
+    'semi_patience': 10,
     'batch_size': 64,
     'semi_supervised': False,
     'clear_model': True,  # clear saved models before run ,prevent load
@@ -28,7 +28,7 @@ PARAMETERS = {
     'dataset': 'laptop',
     "save_model_name": '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl',
     # eval
-    'eval_times': 3,  # 10
+    'eval_times': 3,
     # reproduce
     'seed': 544,
     # optimzer
@@ -46,8 +46,9 @@ PARAMETERS = {
     "encoder_hidden_size": 300,
     # dynamic mask/weight
     "threshould": 4,
-    'mask_ratio': 0.5,
-    'weight_keep': False
+    'drop_attention': 0.7,
+    'mask_ratio': 0.6,  # dropout :0.7
+    'weight_keep': True
 
 }
 

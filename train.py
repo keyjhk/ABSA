@@ -56,6 +56,9 @@ class Option:
 
 class Instructor:
     def __init__(self, opt):
+        # set seed
+        self.reproduce(opt)
+        # attr
         self.opt = opt
         self.batch_size = opt.batch_size
         self.max_seq_len = opt.max_seq_len
@@ -86,7 +89,6 @@ class Instructor:
         self.model_name = None
 
         # init
-        self.reproduce()
         self.init_dataset()
         self.init_model()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
@@ -118,8 +120,7 @@ class Instructor:
         self.logger.info(self.optimizer)
         self.logger.info('=' * 30)
 
-    def reproduce(self):
-        opt = self.opt
+    def reproduce(self, opt):
         if opt.seed is not None:
             random.seed(opt.seed)
             numpy.random.seed(opt.seed)
@@ -183,8 +184,9 @@ class Instructor:
                               encoder_hidden_size=opt.encoder_hidden_size,
                               # dynamic mask/weight
                               threshould=opt.threshould,
+                              drop_attention=opt.drop_attention,
                               mask_ratio=opt.mask_ratio,
-                              weight_keep=opt.weight_keep
+                              weight_keep=opt.weight_keep,
                               ).to(self.device)
         self.model_name = self.model.name
         self.inputs_cols = self.model.inputs_cols
@@ -422,39 +424,41 @@ def plot(x, y, xlabel='', ylabel='', title=''):
 
 
 def parameter_explore(opt, par_vals, isplot=True, datasets=None):
-    # par_vals:{p:[],...}
-    name = 'p'
+    # par_vals:{parameter_name:[val1,],...}
+    logger_fname = 'p'
     for p in par_vals.keys():
-        name += '_{}{}'.format(p[:3], len(par_vals[p]))
-
+        logger_fname += '_{}{}'.format(p[:3], len(par_vals[p]))  # p_{parameter_name}{search_len}
     logger = set_logger(name='parameter_explore',
-                        file='{}_{}.log'.format(name, strftime("%m%d-%H%M", localtime())))
-    datasets = ['restaurant', 'laptop'] if datasets is None else datasets
+                        file='{}_{}.log'.format(logger_fname, strftime("%m%d-%H%M", localtime())))
+
+    datasets = opt.datasets.keys() if datasets is None else datasets
     search_results = {d: [] for d in datasets}
     for dataset in datasets:
         for p, values in par_vals.items():
-            pv = 'parameters_{}{}-{}_{}'.format(p, values[0], values[-1],dataset)
-            results = []
+            pv = 'p_{}{}-{}_{}'.format(p, values[0], values[-1], dataset)  # logger_fname for plot fig
             logger.info(pv.center(30, '*'))
+
+            results = []
             for i, v in enumerate(values):
+                # p_opt.name_par.logger_fname[p.index]_p.val_dataset
                 _opt = opt.set({
                     p: v,
                     'dataset': dataset,
-                }, opt.name + '_{}[{}]_{}_{}'.format(p, i, v,dataset))  # pi:vi
-
+                }, 'p_' + opt.name + '_{}[{}]_{}_{}'.format(p, i, v, dataset))
                 _ins = Instructor(_opt)
                 res = _ins.run()
-                results.append((v, res))
-
-                logger.info('[{}:{}] :{}'.format(p, v, res).center(30, '='))  # show each run
-
-            # finished in one dataset
-            logger.info('=' * 30)
-            for v, r in results:
-                vr = '[{}]={} [res]:{}'.format(p, v, r)
-                logger.info(vr)
+                # add results
+                results.append(res)
+                vr = '[dataset]:{} [{}]:{} [res]:{}'.format(dataset, p, v, res)
                 search_results[dataset].append(vr)
-            logger.info('*' * 30)
+                # show config and result each run
+                logger.info('=' * 30)
+                for x in _opt: logger.info(x)
+                logger.info(vr)
+                logger.info('=' * 30)
+
+            # simple show ,no config
+            for i in range(len(results), 0, -1): logger.info(search_results[dataset][-i])
             if isplot:
                 try:
                     # plot
@@ -464,10 +468,10 @@ def parameter_explore(opt, par_vals, isplot=True, datasets=None):
                 except Exception:
                     pass
 
-    logger.info('finnal results'.center(30, '*'))
+    logger.info('final results'.center(30, '*'))
     for d, res in search_results.items():
-        res = '\n'.join(['dataset:{} result:{}'.format(d, r) for r in res])
-        logger.info(res)
+        # d:dataset res:List
+        for r in res: logger.info(r)
     logger.info('*' * 30)
 
 
@@ -478,7 +482,6 @@ def main(opt):
 
 if __name__ == '__main__':
     opt = Option(PARAMETERS)
-
     # supervised
     opt_res = opt.set({'dataset': 'restaurant'}, name='res')  # default supervised
     opt_lap = opt.set({'dataset': 'laptop'}, name='lap')
@@ -488,20 +491,24 @@ if __name__ == '__main__':
 
     # p
     ps = {
-        # 'weight_keep': [True] * 3 + [False] * 3,
+        # 'weight_keep': [False],
         # 'batch_size': [64],
-        # 'lr': [1e-4,1e-5],
+        # 'semi_lr': [5e-3,5e-4,1e-4,1e-5],
+        # 'semi_l2': [1e-1, 1e-2, 1e-3],
         # 'l2': [1e-2, 5e-3],
         # 'patience':range(10,40,5),
         # 'pos_embedding_size':range(50,350,50),  # 50
-        # 'threshould': list(range(3,30,5)),
+        'threshould': list(range(20,30,2)),
         # 'encoder_hidden_size':[128,256,300,512],
-        'mask_ratio': [x / 10 for x in range(1, 10,2)]
+        # 'mask_ratio': [0.5] ,#[x / 10 for x in range(0, 11, 2)],
+        # "semi_supervised":[True,False]
     }
 
-    # parameter_explore(opt, ps)  # supervised
-    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi
+    # parameter_explore(opt, ps)  # super
+    parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['laptop'])  # semi
 
     # main(opt_res.set({'valid_ratio': 0.5}))
+    # main(opt_semi_res)
     # main(opt_res)
     # main(opt_lap)
+    # main(opt_semi_lap.set({'mask_ratio': 0.7}))
