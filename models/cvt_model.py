@@ -23,7 +23,10 @@ class CVTModel(nn.Module):
                  threshould,
                  drop_attention,
                  mask_ratio,
+                 weight_alpha,
                  weight_keep,
+                 # cvt
+                 unlabeled_loss='all',
                  mode='labeled',
                  ):
 
@@ -42,7 +45,11 @@ class CVTModel(nn.Module):
         # dynamic features
         self.threshould = threshould
         self.mask_ratio = mask_ratio
+        self.weight_alpha = weight_alpha
         self.weight_keep = weight_keep
+        self.drop_attention = drop_attention
+        # cvt
+        self.unlabeled_loss = unlabeled_loss
         # embedding for word/pos/polar
         self.word_embedding = nn.Embedding.from_pretrained(
             torch.tensor(pretrained_embedding, dtype=torch.float))
@@ -141,16 +148,24 @@ class CVTModel(nn.Module):
             out_ms = self.mask_strong(uni_mask, uni_hidden)  # batch,num_polar
             loss_ms = F.kl_div(out_ms.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
-            # mask weak
-            out_mw = self.primary_mask(uni_primary, uni_hidden)  # batch,num_polar
+            # mask weak  drop attention
+            out_mw = self.mask_weak(uni_primary, uni_hidden)  # batch,num_polar
             loss_mw = F.kl_div(out_mw.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
             # dynamic weight
-            # out_weight = self.primary_weight(uni_weight, uni_hidden)
-            # loss_weight = F.kl_div(out_weight.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+            out_weight = self.primary_weight(uni_weight, uni_hidden)
+            loss_weight = F.kl_div(out_weight.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
-            loss = loss_ms
-            # loss = loss_weight
+            if self.unlabeled_loss == 'mask_weak':
+                loss = loss_mw
+            elif self.unlabeled_loss == 'mask_strong':
+                loss = loss_ms
+            elif self.unlabeled_loss == 'weight':
+                loss = loss_weight
+            elif self.unlabeled_loss == 'all':
+                loss = loss_weight + loss_mw
+            else:
+                raise Exception('invalid unlabeled loss')
 
             return loss, label_primary, polarity
 
@@ -158,6 +173,7 @@ class CVTModel(nn.Module):
                          kind='mask'):
         threshould = self.threshould
         mask_ratio = self.mask_ratio
+        weight_alpha = self.weight_alpha
         weight_keep = self.weight_keep
         max_seq_len = self.tokenizer.max_seq_len
 
@@ -184,7 +200,7 @@ class CVTModel(nn.Module):
         elif kind == 'weight':
             # dynamic weight decay
             # weight = (1 - torch.div(position_indices, max_seq_len)).to(device)  # batch,MAX_LEN ; MAX_LEN = 85
-            weight = 0.5 * (1 - torch.div(position_indices, len_x.unsqueeze(1))).to(device)  # batch,MAX_LEN
+            weight = weight_alpha * (1 - torch.div(position_indices, len_x.unsqueeze(1))).to(device)  # batch,MAX_LEN
             if weight_keep:
                 weight = weight.masked_fill(position_indices <= window_size, 1)  # keep 1
             weight = weight[:, :max_x].unsqueeze(dim=2)  # batch,seq_len ,1

@@ -1,3 +1,4 @@
+import sys
 from time import strftime, localtime
 import logging
 
@@ -107,10 +108,10 @@ class Instructor:
 
     def tip(self):
         self.logger.info('tips'.center(30, '='))
+        self.logger.info('sys:{}'.format(sys.platform))
         opt = self.opt
         for x in opt:
             self.logger.info(x)
-
         dataset_info = 'init dataset:{} semi:{}' \
                        '\ntrain:{} valid:{} unlabeled:{} test:{}'.format(
             self.datasetname, self.semi_supervised,
@@ -186,7 +187,10 @@ class Instructor:
                               threshould=opt.threshould,
                               drop_attention=opt.drop_attention,
                               mask_ratio=opt.mask_ratio,
+                              weight_alpha=opt.weight_alpha,
                               weight_keep=opt.weight_keep,
+                              # cvt
+                              unlabeled_loss=opt.unlabeled_loss
                               ).to(self.device)
         self.model_name = self.model.name
         self.inputs_cols = self.model.inputs_cols
@@ -447,6 +451,7 @@ def parameter_explore(opt, par_vals, isplot=True, datasets=None):
                 }, 'p_' + opt.name + '_{}[{}]_{}_{}'.format(p, i, v, dataset))
                 _ins = Instructor(_opt)
                 res = _ins.run()
+                # res = ''
                 # add results
                 results.append(res)
                 vr = '[dataset]:{} [{}]:{} [res]:{}'.format(dataset, p, v, res)
@@ -469,6 +474,7 @@ def parameter_explore(opt, par_vals, isplot=True, datasets=None):
                     pass
 
     logger.info('final results'.center(30, '*'))
+    logger.info('sys:{}'.format(sys.platform))
     for d, res in search_results.items():
         # d:dataset res:List
         for r in res: logger.info(r)
@@ -493,22 +499,29 @@ if __name__ == '__main__':
     ps = {
         # 'weight_keep': [False],
         # 'batch_size': [64],
-        # 'semi_lr': [5e-3,5e-4,1e-4,1e-5],
-        # 'semi_l2': [1e-1, 1e-2, 1e-3],
+        'semi_lr': [1e-3,5e-4,1e-4,1e-5],
+        # 'lr': [5e-3, 1e-3, 5e-4],
+        # 'semi_l2': [5e-3,1e-3,5e-4,1e-4],
         # 'l2': [1e-2, 5e-3],
         # 'patience':range(10,40,5),
         # 'pos_embedding_size':range(50,350,50),  # 50
-        'threshould': list(range(20,30,2)),
-        # 'encoder_hidden_size':[128,256,300,512],
-        # 'mask_ratio': [0.5] ,#[x / 10 for x in range(0, 11, 2)],
-        # "semi_supervised":[True,False]
+        # 'threshould': list(range(8,20,2)),
+        # 'weight_alpha': [0.7,0.5,0.7],#[x / 10 for x in range(1, 12, 2)],
+        # 'encoder_hidden_size': [300,512, 1024],
+        # 'mask_ratio': [x / 10 for x in range(2, 10, 2)],
+        # 'drop_attention': [x/10 for x in range(2,10,1)],
+        # "semi_supervised": [True],
+        # 'unlabeled_loss':['all','mask_weak','weight']
     }
 
     # parameter_explore(opt, ps)  # super
+    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi
     parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['laptop'])  # semi
+    # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi
 
     # main(opt_res.set({'valid_ratio': 0.5}))
     # main(opt_semi_res)
+    # main(opt_semi_lap)
     # main(opt_res)
     # main(opt_lap)
     # main(opt_semi_lap.set({'mask_ratio': 0.7}))

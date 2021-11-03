@@ -15,11 +15,11 @@ PARAMETERS = {
         }
     },
     # train
-    'device': 'cuda:0' if torch.cuda.is_available() else 'cpu',
+    'device': 'cuda' if torch.cuda.is_available() else 'cpu',
     'print_every': 1,
     'step_every': 0.1,  # 0<x<1 ,show progress when achieved
     'patience': 10,  # how many epoches does't increase then stop train
-    'semi_patience': 10,
+    'semi_patience': 10,  # 10 speed for test
     'batch_size': 64,
     'semi_supervised': False,
     'clear_model': True,  # clear saved models before run ,prevent load
@@ -34,7 +34,7 @@ PARAMETERS = {
     # optimzer
     'semi_lr': 1e-3,
     'semi_l2': 5e-3,
-    'lr': 5e-3,
+    'lr': 1e-3,
     'l2': 1e-2,
     # reset:
     "initializer": "xavier_uniform_",
@@ -47,8 +47,11 @@ PARAMETERS = {
     # dynamic mask/weight
     "threshould": 4,
     'drop_attention': 0.7,
-    'mask_ratio': 0.6,  # dropout :0.7
-    'weight_keep': True
+    'mask_ratio': 1,
+    'weight_alpha': 0.7,
+    'weight_keep': False,
+    # cvt
+    'unlabeled_loss': 'all',#'mask_weak',  # mask_strong ,all
 
 }
 
