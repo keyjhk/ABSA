@@ -190,7 +190,8 @@ class Instructor:
                               weight_alpha=opt.weight_alpha,
                               weight_keep=opt.weight_keep,
                               # cvt
-                              unlabeled_loss=opt.unlabeled_loss
+                              unlabeled_loss=opt.unlabeled_loss,
+                              loss_alpha=opt.loss_alpha
                               ).to(self.device)
         self.model_name = self.model.name
         self.inputs_cols = self.model.inputs_cols
@@ -499,25 +500,30 @@ if __name__ == '__main__':
     ps = {
         # 'weight_keep': [False],
         # 'batch_size': [64],
-        'semi_lr': [1e-3,5e-4,1e-4,1e-5],
+        # 'semi_lr': [1e-3],  # [1e-3,5e-4,1e-4,1e-5],
         # 'lr': [5e-3, 1e-3, 5e-4],
         # 'semi_l2': [5e-3,1e-3,5e-4,1e-4],
         # 'l2': [1e-2, 5e-3],
         # 'patience':range(10,40,5),
         # 'pos_embedding_size':range(50,350,50),  # 50
-        # 'threshould': list(range(8,20,2)),
+        # 'threshould': list(range(18,30,2)),
         # 'weight_alpha': [0.7,0.5,0.7],#[x / 10 for x in range(1, 12, 2)],
         # 'encoder_hidden_size': [300,512, 1024],
         # 'mask_ratio': [x / 10 for x in range(2, 10, 2)],
         # 'drop_attention': [x/10 for x in range(2,10,1)],
-        # "semi_supervised": [True],
+        "semi_supervised": [False],
         # 'unlabeled_loss':['all','mask_weak','weight']
+        # 'loss_alpha':[i/10 for i in range(0,12,2)],
+        # 'valid_ratio': [x/10 for x in range(5,10,2)]
     }
 
-    # parameter_explore(opt, ps)  # super
+    parameter_explore(opt, ps)  # super
+    # parameter_explore(opt, ps,datasets=['laptop'])  # laptop
+    # parameter_explore(opt, ps,datasets=['restaurant'])  # restaurant
+
     # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi
-    parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['laptop'])  # semi
-    # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi
+    # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['laptop'])  # semi
+    # parameter_explore(opt.set({"semi_supervised": True,'drop_attention':0.3}), ps,datasets=['restaurant'])  # semi
 
     # main(opt_res.set({'valid_ratio': 0.5}))
     # main(opt_semi_res)

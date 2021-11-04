@@ -114,6 +114,7 @@ class PolarDecoder(nn.Module):
         self.attention_dropout = nn.Dropout(p=p)
         self.dense = nn.Linear(hidden_size * 3, num_polar)
 
+
     def clone(self, name, p=0):
         # share decoder /word embed
         # attention mechanism/dense  is different

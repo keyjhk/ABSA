@@ -45,13 +45,14 @@ PARAMETERS = {
     "position_embedding_size": 50,
     "encoder_hidden_size": 300,
     # dynamic mask/weight
-    "threshould": 4,
+    "threshould": 26,  # 4,
     'drop_attention': 0.7,
     'mask_ratio': 1,
     'weight_alpha': 0.7,
     'weight_keep': False,
     # cvt
-    'unlabeled_loss': 'all',#'mask_weak',  # mask_strong ,all
+    'unlabeled_loss': 'mask_weak',  # 'mask_weak',  # mask_strong ,all
+    'loss_alpha': 1
 
 }
 

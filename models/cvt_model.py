@@ -3,8 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models.encoder import *
 from models.primary import *
-from models import atae_lstm
-
+from layers.label_smooth import LabelSmoothing
 
 class CVTModel(nn.Module):
     def __init__(self,
@@ -26,7 +25,8 @@ class CVTModel(nn.Module):
                  weight_alpha,
                  weight_keep,
                  # cvt
-                 unlabeled_loss='all',
+                 unlabeled_loss,
+                 loss_alpha,
                  mode='labeled',
                  ):
 
@@ -50,6 +50,7 @@ class CVTModel(nn.Module):
         self.drop_attention = drop_attention
         # cvt
         self.unlabeled_loss = unlabeled_loss
+        self.loss_alpha = loss_alpha
         # embedding for word/pos/polar
         self.word_embedding = nn.Embedding.from_pretrained(
             torch.tensor(pretrained_embedding, dtype=torch.float))
@@ -85,7 +86,8 @@ class CVTModel(nn.Module):
         self.name = self.encoder.name
 
         # loss
-        self.loss = nn.CrossEntropyLoss()
+        self.loss = LabelSmoothing(0.1)
+        # self.loss = nn.CrossEntropyLoss()
 
     def forward(self, *inputs,
                 mode='labeled'):
@@ -156,6 +158,8 @@ class CVTModel(nn.Module):
             out_weight = self.primary_weight(uni_weight, uni_hidden)
             loss_weight = F.kl_div(out_weight.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
+
+
             if self.unlabeled_loss == 'mask_weak':
                 loss = loss_mw
             elif self.unlabeled_loss == 'mask_strong':
@@ -164,6 +168,8 @@ class CVTModel(nn.Module):
                 loss = loss_weight
             elif self.unlabeled_loss == 'all':
                 loss = loss_weight + loss_mw
+                # loss = self.loss_alpha* loss_ms + (1-self.loss_alpha)* loss_mw
+                # loss = self.loss_alpha* loss_ms + (1-self.loss_alpha)* loss_weight
             else:
                 raise Exception('invalid unlabeled loss')
 
@@ -221,7 +227,7 @@ class CVTModel(nn.Module):
         # freeze primary only; encoder is unfreezed
         self.primary.eval()
         self.primary.decoder.train()  # exclude decoder
-        for params in self.primary.parameters():
+        for name,params in self.primary.named_parameters():
             params.requires_grad = False
 
     def _unfreeze_model(self):
