@@ -17,7 +17,7 @@ PARAMETERS = {
     # train
     'device': 'cuda' if torch.cuda.is_available() else 'cpu',
     'print_every': 1,
-    'step_every': 0.1,  # 0<x<1 ,show progress when achieved
+    'step_every': 0.25,  # 0<x<1 ,show progress when achieved
     'patience': 10,  # how many epoches does't increase then stop train
     'semi_patience': 10,  # 10 speed for test
     'batch_size': 64,
@@ -45,14 +45,15 @@ PARAMETERS = {
     "position_embedding_size": 50,
     "encoder_hidden_size": 300,
     # dynamic mask/weight
-    "threshould": 26,  # 4,
+    "threshould": 12,  # 26 lap,12 res
     'drop_attention': 0.7,
     'mask_ratio': 1,
     'weight_alpha': 0.7,
     'weight_keep': False,
     # cvt
-    'unlabeled_loss': 'mask_weak',  # 'mask_weak',  # mask_strong ,all
-    'loss_alpha': 1
+    'unlabeled_loss': 'all',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
+    'loss_alpha': 1,
+    'loss_cal':'kl'  # loss
 
 }
 

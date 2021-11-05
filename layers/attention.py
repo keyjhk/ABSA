@@ -98,6 +98,7 @@ class Attention(nn.Module):
             raise RuntimeError('invalid score_function')
 
         if mask is not None:
+            # mask: q_len,k_len
             score = score.masked_fill(mask, value=torch.tensor(-1e9))
         score = F.softmax(score, dim=-1)  # head*mb_size,q_len,k_len
         # 到此为止 已经得到了可以作为权重的score了 以下操作在于融合 attention 下的value(key)

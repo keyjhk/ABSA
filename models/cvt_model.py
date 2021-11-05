@@ -5,6 +5,7 @@ from models.encoder import *
 from models.primary import *
 from layers.label_smooth import LabelSmoothing
 
+
 class CVTModel(nn.Module):
     def __init__(self,
                  num_pos,
@@ -27,6 +28,7 @@ class CVTModel(nn.Module):
                  # cvt
                  unlabeled_loss,
                  loss_alpha,
+                 loss_cal,
                  mode='labeled',
                  ):
 
@@ -51,6 +53,7 @@ class CVTModel(nn.Module):
         # cvt
         self.unlabeled_loss = unlabeled_loss
         self.loss_alpha = loss_alpha
+        self.loss_cal = loss_cal
         # embedding for word/pos/polar
         self.word_embedding = nn.Embedding.from_pretrained(
             torch.tensor(pretrained_embedding, dtype=torch.float))
@@ -73,8 +76,8 @@ class CVTModel(nn.Module):
                                     tokenizer=tokenizer)
 
         # auxiliary
-        self.primary_full = self.primary.clone('full')
         self.mask_weak = self.primary.clone('mask_weak', drop_attention)
+        self.mask_window = self.primary.clone('mask_window')
         self.mask_strong = self.primary.clone('mask_strong')
         self.primary_weight = self.primary.clone('weight')
 
@@ -86,8 +89,8 @@ class CVTModel(nn.Module):
         self.name = self.encoder.name
 
         # loss
-        self.loss = LabelSmoothing(0.1)
-        # self.loss = nn.CrossEntropyLoss()
+        self.loss = nn.CrossEntropyLoss()
+        self.label_smooth = LabelSmoothing(0.1)
 
     def forward(self, *inputs,
                 mode='labeled'):
@@ -115,6 +118,7 @@ class CVTModel(nn.Module):
         position = squeeze_embedding(position, len_x)
 
         # pool(average) aspect
+        max_x = len_x.max()
         aspect_pool = self.pool_aspect(aspect_indices, aspect_boundary)  # batch,1,embed_dim
 
         # uni_out
@@ -125,18 +129,11 @@ class CVTModel(nn.Module):
         uni_mask = self.dynamic_features(uni_primary, position_indices, len_x)
         uni_weight = self.dynamic_features(uni_primary, position_indices, len_x, kind='weight')
 
+        # auxiliary modules out
+
         loss = 0
         if mode == "labeled":  # 监督训练
             self._unfreeze_model()
-            # loss += self.alpha * self.loss(out, target)
-            # location loss
-            # locations = self.location_decoder(encoder_out,
-            #                                   last_hidden,
-            #                                   context)  # batch,2,seq_len
-            # loss2 = (1 - self.alpha) * (self.loss(locations[:, 0, :], aspect_boundary[:, 0]) +
-            #                             self.loss(locations[:, 1, :], aspect_boundary[:, 1])
-            #                             )
-
             # docoder primary
             out = self.primary(uni_primary, uni_hidden)
             loss = self.loss(out, polarity)
@@ -144,19 +141,36 @@ class CVTModel(nn.Module):
         elif mode == "unlabeled":  # 无监督训练
             self._freeze_model()
             label_primary = self.primary(uni_primary, uni_hidden)  # batch,num_polar
-
             label_primary = label_primary.detach()
             # mask strong
             out_ms = self.mask_strong(uni_mask, uni_hidden)  # batch,num_polar
-            loss_ms = F.kl_div(out_ms.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
             # mask weak  drop attention
             out_mw = self.mask_weak(uni_primary, uni_hidden)  # batch,num_polar
-            loss_mw = F.kl_div(out_mw.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+
+            # mask window
+            mask_window = (position_indices > self.threshould)[:max_x].unsqueeze(1)  # batch,1,seq_len
+            out_mww = self.mask_window(uni_primary,uni_hidden,mask_window)
+            # out_mww = self.mask_window(uni_primary, uni_hidden)  # same with mask_weak
 
             # dynamic weight
             out_weight = self.primary_weight(uni_weight, uni_hidden)
-            loss_weight = F.kl_div(out_weight.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+
+            loss_cal = self.loss_cal
+            # loss_cal =''
+            if loss_cal == 'kl':
+                loss_ms = F.kl_div(out_ms.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+                loss_mw = F.kl_div(out_mw.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+                loss_mww = F.kl_div(out_mww.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
+                loss_weight = F.kl_div(out_weight.log_softmax(dim=-1), label_primary.softmax(dim=-1),
+                                       reduction='batchmean')
+            else:
+                label_primary = label_primary.argmax(-1)
+                loss_ms = self.loss(out_ms, label_primary)
+                loss_mw = self.loss(out_mw, label_primary)
+                loss_mww = self.loss(out_mww, label_primary)
+                loss_weight = self.loss(out_weight, label_primary)
+                # label smooth
 
 
 
@@ -166,8 +180,10 @@ class CVTModel(nn.Module):
                 loss = loss_ms
             elif self.unlabeled_loss == 'weight':
                 loss = loss_weight
+            elif self.unlabeled_loss == 'mask_window':
+                loss = loss_mww
             elif self.unlabeled_loss == 'all':
-                loss = loss_weight + loss_mw
+                loss = loss_mw + loss_ms
                 # loss = self.loss_alpha* loss_ms + (1-self.loss_alpha)* loss_mw
                 # loss = self.loss_alpha* loss_ms + (1-self.loss_alpha)* loss_weight
             else:
@@ -227,7 +243,7 @@ class CVTModel(nn.Module):
         # freeze primary only; encoder is unfreezed
         self.primary.eval()
         self.primary.decoder.train()  # exclude decoder
-        for name,params in self.primary.named_parameters():
+        for name, params in self.primary.named_parameters():
             params.requires_grad = False
 
     def _unfreeze_model(self):
