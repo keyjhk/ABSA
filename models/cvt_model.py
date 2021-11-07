@@ -13,22 +13,7 @@ class CVTModel(nn.Module):
                  num_position,
                  pretrained_embedding,
                  tokenizer,
-                 ### parameters for model ###
-                 word_embedding_size,
-                 pos_embedding_size,
-                 polar_embedding_size,
-                 position_embedding_size,
-                 encoder_hidden_size,
-                 # dynamic features
-                 threshould,
-                 drop_attention,
-                 mask_ratio,
-                 weight_alpha,
-                 weight_keep,
-                 # cvt
-                 unlabeled_loss,
-                 loss_alpha,
-                 loss_cal,
+                 opt,
                  mode='labeled',
                  ):
 
@@ -44,46 +29,49 @@ class CVTModel(nn.Module):
 
         self.mode = mode
         self.tokenizer = tokenizer
+        self.opt = opt
         # dynamic features
-        self.threshould = threshould
-        self.mask_ratio = mask_ratio
-        self.weight_alpha = weight_alpha
-        self.weight_keep = weight_keep
-        self.drop_attention = drop_attention
+        self.threshould = opt.threshould
+        self.mask_ratio = opt.mask_ratio
+        self.weight_alpha = opt.weight_alpha
+        self.weight_keep = opt.weight_keep
+        self.drop_attention = opt.drop_attention
         # cvt
-        self.unlabeled_loss = unlabeled_loss
-        self.loss_alpha = loss_alpha
-        self.loss_cal = loss_cal
+        self.unlabeled_loss = opt.unlabeled_loss
+        self.loss_alpha = opt.loss_alpha
+        self.loss_cal = opt.loss_cal
         # embedding for word/pos/polar
         self.word_embedding = nn.Embedding.from_pretrained(
             torch.tensor(pretrained_embedding, dtype=torch.float))
-        self.pos_embedding = nn.Embedding(num_pos, pos_embedding_size)
-        self.polar_embedding = nn.Embedding(num_polar, polar_embedding_size)
-        self.position_embedding = nn.Embedding(num_position + 1, position_embedding_size)
+        self.pos_embedding = nn.Embedding(num_pos, opt.pos_embedding_size)
+        self.polar_embedding = nn.Embedding(num_polar, opt.polar_embedding_size)
+        self.position_embedding = nn.Embedding(num_position + 1, opt.position_embedding_size)
 
         # encoder
-        self.encoder_hidden_size = encoder_hidden_size
-        self.encoder = BilayerEncoderP(word_embed_dim=word_embedding_size,
-                                       position_embed_dim=position_embedding_size,
-                                       hidden_size=encoder_hidden_size,
+        self.encoder_hidden_size = opt.encoder_hidden_size
+        self.encoder = BilayerEncoderP(word_embed_dim=opt.word_embedding_size,
+                                       position_embed_dim=opt.position_embedding_size,
+                                       hidden_size=opt.encoder_hidden_size,
+                                       drop_lab=opt.drop_lab,
+                                       drop_unlab=opt.drop_unlab,
                                        )
 
         # primary
 
         self.primary = PolarDecoder(word_embedding=self.word_embedding,
-                                    hidden_size=encoder_hidden_size,
+                                    hidden_size=opt.encoder_hidden_size,
                                     num_polar=num_polar,
                                     tokenizer=tokenizer)
 
         # auxiliary
-        self.mask_weak = self.primary.clone('mask_weak', drop_attention)
+        self.mask_weak = self.primary.clone('mask_weak', opt.drop_attention)
         self.mask_window = self.primary.clone('mask_window')
         self.mask_strong = self.primary.clone('mask_strong')
         self.primary_weight = self.primary.clone('weight')
 
         # location decoder
         self.location_decoder = LocationDecoder(self.word_embedding,
-                                                encoder_hidden_size,
+                                                self.encoder_hidden_size,
                                                 tokenizer=tokenizer)
 
         self.name = self.encoder.name
@@ -181,7 +169,7 @@ class CVTModel(nn.Module):
             elif self.unlabeled_loss == 'mask_window':
                 loss = loss_mww
             elif self.unlabeled_loss == 'all':
-                loss = loss_mw + loss_mww
+                loss = loss_mw + loss_ms
                 # loss = self.loss_alpha* loss_ms + (1-self.loss_alpha)* loss_mw
                 # loss = self.loss_alpha* loss_ms + (1-self.loss_alpha)* loss_weight
             else:

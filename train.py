@@ -177,22 +177,7 @@ class Instructor:
                               num_position=tokenizer.max_seq_len,
                               pretrained_embedding=self.pretrain_embedding,
                               tokenizer=tokenizer,
-                              # encoder
-                              word_embedding_size=opt.word_embedding_size,
-                              pos_embedding_size=opt.pos_embedding_size,
-                              polar_embedding_size=opt.polar_embedding_size,
-                              position_embedding_size=opt.position_embedding_size,
-                              encoder_hidden_size=opt.encoder_hidden_size,
-                              # dynamic mask/weight
-                              threshould=opt.threshould,
-                              drop_attention=opt.drop_attention,
-                              mask_ratio=opt.mask_ratio,
-                              weight_alpha=opt.weight_alpha,
-                              weight_keep=opt.weight_keep,
-                              # cvt
-                              unlabeled_loss=opt.unlabeled_loss,
-                              loss_alpha=opt.loss_alpha,
-                              loss_cal = opt.loss_cal,
+                              opt=opt
                               ).to(self.device)
         self.model_name = self.model.name
         self.inputs_cols = self.model.inputs_cols
@@ -442,14 +427,6 @@ def parameter_explore(opt, par_vals, isplot=True, datasets=None, dynamic_choose=
             else:
                 # datasets = ['restaurant']
                 datasets = ['laptop']
-        # drop attention
-        if datasets == ['laptop']:
-            opt=opt.set({'drop_attention':0.5,'threshould':14,'semi_l2':1e-3,'semi_lr':5e-4})
-            # opt=opt.set({'drop_attention':0.7,'threshould':14,'semi_l2':1e-3,'semi_lr':5e-4})
-        elif datasets == ['restaurant']:
-            opt=opt.set({})
-
-
 
     logger_fname = 'p'
     for p in par_vals.keys():
@@ -521,19 +498,21 @@ if __name__ == '__main__':
         # 'weight_keep': [False],
         # 'batch_size': [64],
         # 'semi_lr': [1e-3,5e-4],
-        'semi_l2': [1e-2,5e-3],
+        # 'semi_l2': [1e-2,5e-3],
         # 'lr': [1e-3, 5e-4],
         # 'l2': [1e-2, 5e-3],
         # 'patience':range(10,40,5),
         # 'pos_embedding_size':range(50,350,50),  # 50
-        # 'threshould': list(range(4,20,2)),
+        'threshould': (7,9,1),
         # 'weight_alpha': [x / 10 for x in range(1, 10, 2)],
         # 'encoder_hidden_size': [300,512, 1024],
         # 'mask_ratio': [x / 10 for x in range(2, 10, 2)],
-        # 'drop_attention': [x/10 for x in range(2,10,1)],
+        # 'drop_lab':[x/10 for x in range(0,8)],
+        # 'drop_unlab':[x/10 for x in range(5,9)],
+        # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
         # "semi_supervised": [False], # for sup
         # "semi_supervised": [True], # for semi
-        # 'unlabeled_loss': ['mask_weak','mask_window','all'],
+        # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
         # 'loss_alpha':[i/10 for i in range(0,12,2)],
         # 'valid_ratio': [x/10 for x in range(1,10,2)]
     }
@@ -544,15 +523,13 @@ if __name__ == '__main__':
     # parameter_explore(opt, ps,datasets=['laptop'])  # laptop
     # parameter_explore(opt, ps,datasets=['restaurant'])  # restaurant
 
-    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi  dynamic choose
+    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi  dynamic choose
     # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=datasets)  # semi  dynamic choose
     # parameter_explore(opt.set({"semi_supervised": True, 'unlabeled_loss': 'all'}), ps, datasets=['laptop'])  # semi lap
     # parameter_explore(opt.set({"semi_supervised": True,'unlabeled_loss': 'all'}), ps,datasets=['restaurant'])  # semi res
 
     # main(opt_semi_res)
 
-    main(opt_semi_lap)
+    # main(opt_semi_lap)
     # main(opt_res)
     # main(opt_lap)
-
-

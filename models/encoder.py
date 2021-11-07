@@ -337,7 +337,9 @@ class BilayerEncoderP(nn.Module):
     def __init__(self,
                  word_embed_dim,
                  position_embed_dim,
-                 hidden_size
+                 hidden_size,
+                 drop_lab,
+                 drop_unlab
                  ):
         super().__init__()
         self.name = 'bilayer-encoderp'
@@ -348,8 +350,8 @@ class BilayerEncoderP(nn.Module):
         # gru_input_size = self.word_embedding_size   # word
         self.uni_gru = nn.GRU(word_embed_dim + position_embed_dim, hidden_size,
                               batch_first=True, bidirectional=True)
-        self.uni_dropout_lab = nn.Dropout(p=0.5)
-        self.uni_dropout_unlab = nn.Dropout(p=0.8)
+        self.uni_dropout_lab = nn.Dropout(p=drop_lab)
+        self.uni_dropout_unlab = nn.Dropout(p=drop_unlab)
 
     def forward(self, word, position, len_x, mode):
         # word/pos/polar: batch,MAX_LEN,embedding_size  ;len_x:batch

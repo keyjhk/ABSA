@@ -32,8 +32,8 @@ PARAMETERS = {
     # reproduce
     'seed': 544,
     # optimizer
-    'semi_lr': 5e-4,#5e-4,
-    'semi_l2': 5e-3,#5e-3,
+    'semi_lr': 1e-3,  # 5e-4,
+    'semi_l2': 5e-3,  # 5e-3,
     'lr': 1e-3,  # 1e-3,
     'l2': 5e-3,  # 1e-2,
     # reset:
@@ -45,13 +45,15 @@ PARAMETERS = {
     "position_embedding_size": 50,
     "encoder_hidden_size": 300,
     # dynamic mask/weight
-    "threshould": 4,  # 26 lap,12 res
-    'drop_attention': 0.4,
+    "threshould": 8,  # 26 lap,12 res
+    'drop_attention': 0.5,
     'mask_ratio': 1,
     'weight_alpha': 1,
     'weight_keep': True,
     # cvt
-    'unlabeled_loss': 'mask_weak',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
+    'drop_lab': 0.5,
+    'drop_unlab': 0.6,
+    'unlabeled_loss': 'mask_strong',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
     'loss_alpha': 1,
     'loss_cal': 'kl'  # loss
 
