@@ -122,7 +122,7 @@ class CVTModel(nn.Module):
         aspect_pool = self.pool_aspect(aspect_indices, aspect_boundary)  # batch,1,embed_dim
 
         # uni_out
-        uni_out, uni_hidden = self.encoder(word, position, len_x)
+        uni_out, uni_hidden = self.encoder(word, position, len_x,mode)
         uni_forward = uni_out[:, :, :self.encoder_hidden_size]
         uni_backward = uni_out[:, :, self.encoder_hidden_size:]
         uni_primary = uni_forward + uni_backward
@@ -150,7 +150,7 @@ class CVTModel(nn.Module):
 
             # mask window
             mask_window = (position_indices > self.threshould)[:max_x].unsqueeze(1)  # batch,1,seq_len
-            out_mww = self.mask_window(uni_primary,uni_hidden,mask_window)
+            out_mww = self.mask_window(uni_primary, uni_hidden, mask_window)
             # out_mww = self.mask_window(uni_primary, uni_hidden)  # same with mask_weak
 
             # dynamic weight
@@ -172,8 +172,6 @@ class CVTModel(nn.Module):
                 loss_weight = self.loss(out_weight, label_primary)
                 # label smooth
 
-
-
             if self.unlabeled_loss == 'mask_weak':
                 loss = loss_mw
             elif self.unlabeled_loss == 'mask_strong':
@@ -183,7 +181,7 @@ class CVTModel(nn.Module):
             elif self.unlabeled_loss == 'mask_window':
                 loss = loss_mww
             elif self.unlabeled_loss == 'all':
-                loss = loss_mw + loss_ms
+                loss = loss_mw + loss_mww
                 # loss = self.loss_alpha* loss_ms + (1-self.loss_alpha)* loss_mw
                 # loss = self.loss_alpha* loss_ms + (1-self.loss_alpha)* loss_weight
             else:

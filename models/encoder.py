@@ -112,13 +112,17 @@ class PolarDecoder(nn.Module):
 
         self.attention_ch = Attention(hidden_size)  # hidden/context score_function='mlp'
         self.attention_dropout = nn.Dropout(p=p)
-        self.dense = nn.Linear(hidden_size * 3, num_polar)
-
+        # self.dense = nn.Linear(hidden_size * 3, num_polar)
+        self.dense = nn.Sequential(
+            nn.Linear(hidden_size * 3, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, num_polar),
+        )
 
     def clone(self, name, p=None):
         # share decoder /word embed
-        # attention mechanism/dense  is different4
-        p=p if p else self.attention_dropout.p
+        # attention mechanism/dense  is different
+        p = p if p else self.attention_dropout.p
         polar_decoder = PolarDecoder(word_embedding=self.word_embedding,
                                      hidden_size=self.hidden_size,
                                      num_polar=self.num_polar,
@@ -129,7 +133,7 @@ class PolarDecoder(nn.Module):
         polar_decoder.decoder = self.decoder
         return polar_decoder
 
-    def forward(self, encoder_out, last_hidden,mask_attention=None):
+    def forward(self, encoder_out, last_hidden, mask_attention=None):
         # encoder: batch,seq_len,hidden_size ;
         # aspect : # batch,1,embed_dim
         # last_hidden: 2(directions),batch,hidden_size
@@ -149,7 +153,7 @@ class PolarDecoder(nn.Module):
         # decoder
         # decoder_out: batch,1,hidden_size  ; encoder: batch,seq,hidden_size
         decoder_out, _ = self.decoder(decoder_out, last_hidden)
-        _, score = self.attention_ch(q=decoder_out, k=encoder_out,mask=mask_attention)  # batch,1,seq_len
+        _, score = self.attention_ch(q=decoder_out, k=encoder_out, mask=mask_attention)  # batch,1,seq_len
         score = self.attention_dropout(score)
         context = torch.bmm(score, encoder_out)  # batch,1,hidden_size
 
@@ -344,16 +348,19 @@ class BilayerEncoderP(nn.Module):
         # gru_input_size = self.word_embedding_size   # word
         self.uni_gru = nn.GRU(word_embed_dim + position_embed_dim, hidden_size,
                               batch_first=True, bidirectional=True)
-        self.uni_dropout = nn.Dropout(p=0.3)
+        self.uni_dropout_lab = nn.Dropout(p=0.5)
+        self.uni_dropout_unlab = nn.Dropout(p=0.8)
 
-
-    def forward(self, word, position, len_x):
+    def forward(self, word, position, len_x, mode):
         # word/pos/polar: batch,MAX_LEN,embedding_size  ;len_x:batch
         x = torch.cat((word, position), dim=-1)
         pad_x = pack_padded_sequence(x, len_x.cpu(), batch_first=True, enforce_sorted=False)
         uni_out, uni_hidden = self.uni_gru(pad_x)  # hidden:layer*direction,batch,hidden_size
         uni_out, _ = pad_packed_sequence(uni_out, batch_first=True)  # batch,seq_len,hidden_size*2
-        uni_out = self.uni_dropout(uni_out)
+        if mode == 'labeled':
+            uni_out = self.uni_dropout_lab(uni_out)
+        else:
+            uni_out = self.uni_dropout_unlab(uni_out)
         return uni_out, uni_hidden  # for decoder
 
 

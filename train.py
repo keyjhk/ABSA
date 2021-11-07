@@ -440,7 +440,8 @@ def parameter_explore(opt, par_vals, isplot=True, datasets=None, dynamic_choose=
             if platform.startswith('win'):
                 datasets = ['laptop']
             else:
-                datasets = ['restaurant']
+                # datasets = ['restaurant']
+                datasets = ['laptop']
         # drop attention
         if datasets == ['laptop']:
             opt=opt.set({'drop_attention':0.5,'threshould':14,'semi_l2':1e-3,'semi_lr':5e-4})
@@ -452,7 +453,7 @@ def parameter_explore(opt, par_vals, isplot=True, datasets=None, dynamic_choose=
 
     logger_fname = 'p'
     for p in par_vals.keys():
-        logger_fname += '_{}{}'.format(p[:3], len(par_vals[p]))  # p_{parameter_name}{search_len}
+        logger_fname += '_{}{}'.format(p, len(par_vals[p]))  # p_{parameter_name}{search_len}
     logger = set_logger(name='parameter_explore',
                         file='{}_{}.log'.format(logger_fname, strftime("%m%d-%H%M", localtime())))
 
@@ -519,20 +520,20 @@ if __name__ == '__main__':
     ps = {
         # 'weight_keep': [False],
         # 'batch_size': [64],
-        # 'semi_lr': [5e-3,1e-3,5e-4],
-        # 'lr': [5e-3, 1e-3, 5e-4],
-        # 'semi_l2': [1e-2,5e-3,1e-3],
+        # 'semi_lr': [1e-3,5e-4],
+        'semi_l2': [1e-2,5e-3],
+        # 'lr': [1e-3, 5e-4],
         # 'l2': [1e-2, 5e-3],
         # 'patience':range(10,40,5),
         # 'pos_embedding_size':range(50,350,50),  # 50
-        # 'threshould': list(range(4,30,5)),
+        # 'threshould': list(range(4,20,2)),
         # 'weight_alpha': [x / 10 for x in range(1, 10, 2)],
         # 'encoder_hidden_size': [300,512, 1024],
         # 'mask_ratio': [x / 10 for x in range(2, 10, 2)],
         # 'drop_attention': [x/10 for x in range(2,10,1)],
         # "semi_supervised": [False], # for sup
-        "semi_supervised": [True], # for semi
-        # 'unlabeled_loss': ['mask_weak','mask_strong' 'all'],
+        # "semi_supervised": [True], # for semi
+        # 'unlabeled_loss': ['mask_weak','mask_window','all'],
         # 'loss_alpha':[i/10 for i in range(0,12,2)],
         # 'valid_ratio': [x/10 for x in range(1,10,2)]
     }
@@ -543,12 +544,15 @@ if __name__ == '__main__':
     # parameter_explore(opt, ps,datasets=['laptop'])  # laptop
     # parameter_explore(opt, ps,datasets=['restaurant'])  # restaurant
 
-    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi  dynamic choose
+    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi  dynamic choose
     # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=datasets)  # semi  dynamic choose
     # parameter_explore(opt.set({"semi_supervised": True, 'unlabeled_loss': 'all'}), ps, datasets=['laptop'])  # semi lap
     # parameter_explore(opt.set({"semi_supervised": True,'unlabeled_loss': 'all'}), ps,datasets=['restaurant'])  # semi res
 
     # main(opt_semi_res)
-    # main(opt_semi_lap.set({'unlabeled_loss':'mask_weak'}))
+
+    main(opt_semi_lap)
     # main(opt_res)
     # main(opt_lap)
+
+

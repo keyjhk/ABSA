@@ -31,11 +31,11 @@ PARAMETERS = {
     'eval_times': 3,
     # reproduce
     'seed': 544,
-    # optimzer
-    'semi_lr': 1e-3,
-    'semi_l2': 5e-3,
-    'lr': 1e-3,
-    'l2': 1e-2,
+    # optimizer
+    'semi_lr': 5e-4,#5e-4,
+    'semi_l2': 5e-3,#5e-3,
+    'lr': 1e-3,  # 1e-3,
+    'l2': 5e-3,  # 1e-2,
     # reset:
     "initializer": "xavier_uniform_",
     # model
@@ -45,15 +45,15 @@ PARAMETERS = {
     "position_embedding_size": 50,
     "encoder_hidden_size": 300,
     # dynamic mask/weight
-    "threshould": 12,  # 26 lap,12 res
-    'drop_attention': 0.7,
+    "threshould": 4,  # 26 lap,12 res
+    'drop_attention': 0.4,
     'mask_ratio': 1,
-    'weight_alpha': 0.7,
-    'weight_keep': False,
+    'weight_alpha': 1,
+    'weight_keep': True,
     # cvt
-    'unlabeled_loss': 'all',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
+    'unlabeled_loss': 'mask_weak',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
     'loss_alpha': 1,
-    'loss_cal':'kl'  # loss
+    'loss_cal': 'kl'  # loss
 
 }
 
