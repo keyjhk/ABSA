@@ -507,12 +507,13 @@ if __name__ == '__main__':
         # 'mask_ratio': [x / 10 for x in range(2, 10, 1)],
         # 'drop_lab': [x / 10 for x in range(0, 8)],
         # 'drop_unlab': [x / 10 for x in range(3, 9)],
-        'drop_attention': [x / 10 for x in range(2, 10, 1)],
+
+        # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
         # "semi_supervised": [False], # for sup
         # "semi_supervised": [True], # for semi
         # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
         # 'loss_alpha':[i/10 for i in range(0,12,2)],
-        # 'valid_ratio': [x/10 for x in range(1,10,2)]
+        'valid_ratio': [x/10 for x in range(0,10,2)]
     }
 
     datasets = opt.datasets.keys()

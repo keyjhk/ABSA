@@ -57,7 +57,6 @@ class CVTModel(nn.Module):
                                        )
 
         # primary
-
         self.primary = PolarDecoder(word_embedding=self.word_embedding,
                                     hidden_size=opt.encoder_hidden_size,
                                     num_polar=num_polar,
@@ -78,7 +77,6 @@ class CVTModel(nn.Module):
 
         # loss
         self.loss = nn.CrossEntropyLoss()
-        self.label_smooth = LabelSmoothing(0.1)
 
     def forward(self, *inputs,
                 mode='labeled'):

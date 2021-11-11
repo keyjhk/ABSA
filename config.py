@@ -46,7 +46,7 @@ PARAMETERS = {
     "encoder_hidden_size": 300,
     # dynamic mask/weight
     "threshould": 8,  # 26 lap,12 res
-    'drop_attention': 0.5,
+    'drop_attention': 0.9,
     'mask_ratio': 1,
     'weight_alpha': 1,
     'weight_keep': True,

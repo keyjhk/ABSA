@@ -14,7 +14,7 @@ class DynamicGRU(nn.Module):
                           bidirectional=bidirectional, batch_first=batch_first, num_layers=num_layers)
 
     def forward(self, x, len_x=None, hidden=None):
-        if len_x:
+        if len_x is not None:
             pad_x = pack_padded_sequence(x, len_x.cpu(), batch_first=self.batch_first, enforce_sorted=False)
             gru_out, gru_hidden = self.gru(pad_x, hidden)  # hidden:layer*direction,batch,hidden_size
             gru_out, _ = pad_packed_sequence(gru_out, batch_first=self.batch_first)
