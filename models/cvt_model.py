@@ -49,7 +49,7 @@ class CVTModel(nn.Module):
 
         # encoder
         self.encoder_hidden_size = opt.encoder_hidden_size
-        self.encoder = BilayerEncoderP(word_embed_dim=opt.word_embedding_size,
+        self.encoder = PositionEncoder(word_embed_dim=opt.word_embedding_size,
                                        position_embed_dim=opt.position_embedding_size,
                                        hidden_size=opt.encoder_hidden_size,
                                        drop_lab=opt.drop_lab,

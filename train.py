@@ -414,7 +414,7 @@ def plot(x, y, xlabel='', ylabel='', title=''):
     plt.show()
 
 
-def parameter_explore(opt, par_vals, isplot=True, datasets=['laptop']):
+def parameter_explore(opt, par_vals, datasets=['laptop']):
     # par_vals:{parameter_name:[val1,],...}
 
     logger_fname = 'p'
@@ -424,7 +424,9 @@ def parameter_explore(opt, par_vals, isplot=True, datasets=['laptop']):
                         file='{}_{}.log'.format(logger_fname, strftime("%m%d-%H%M", localtime())))
 
     search_options = []
-    if len(par_vals) == 1:
+    if len(par_vals) == 0:
+        search_options.append(opt)
+    elif len(par_vals) == 1:
         # {p:[v1,]}
         for p, values in par_vals.items():
             for v in values:
@@ -474,48 +476,6 @@ def parameter_explore(opt, par_vals, isplot=True, datasets=['laptop']):
     logger.info('*' * 30)
     logger.info('best params：{}'.format(best_params))
 
-    #     for p, values in par_vals.items():
-    #         pv = 'p_{}{}-{}_{}'.format(p, values[0], values[-1], dataset)  # logger_fname for plot fig
-    #         logger.info(pv.center(30, '*'))
-    #
-    #         results = []
-    #         for i, v in enumerate(values):
-    #             # p_opt.name_par.logger_fname[p.index]_p.val_dataset
-    #             _opt = opt.set({
-    #                 p: v,
-    #                 'dataset': dataset,
-    #             }, 'p_' + opt.name + '_{}[{}]_{}_{}'.format(p, i, v, dataset))
-    #             _ins = Instructor(_opt)
-    #             res = _ins.run()
-    #             # res = ''
-    #             # add results
-    #             results.append(res)
-    #             vr = '[dataset]:{} [{}]:{} [res]:{}'.format(dataset, p, v, res)
-    #             search_results[dataset].append(vr)
-    #             # show config and result each run
-    #             logger.info('=' * 30)
-    #             for x in _opt: logger.info(x)
-    #             logger.info(vr)
-    #             logger.info('=' * 30)
-    #
-    #         # simple show ,no config
-    #         for i in range(len(results), 0, -1): logger.info(search_results[dataset][-i])
-    #         if isplot:
-    #             try:
-    #                 # plot
-    #                 x = [float(v) for v in values]
-    #                 y = [res['acc'] for _, res in results]
-    #                 plot(x=x, y=y, xlabel=p, ylabel='acc', title=pv + '+' + opt.name)
-    #             except Exception:
-    #                 pass
-    #
-    # logger.info('final results'.center(30, '*'))
-    # logger.info('sys:{}'.format(sys.platform))
-    # for d, res in search_results.items():
-    #     # d:dataset res:List
-    #     for r in res: logger.info(r)
-    # logger.info('*' * 30)
-
 
 def main(opt):
     instrutor = Instructor(opt)
@@ -541,12 +501,12 @@ if __name__ == '__main__':
         # 'l2': [1e-2, 5e-3],
         # 'patience':range(10,40,5),
         # 'pos_embedding_size':range(50,350,50),  # 50
-        'threshould': range(4, 10),
+        # 'threshould': range(4, 10),
         # 'weight_alpha': [x / 10 for x in range(1, 10, 2)],
         # 'encoder_hidden_size': [300,512, 1024],
-        'mask_ratio': [x / 10 for x in range(2, 10, 1)],
-        'drop_lab': [x / 10 for x in range(0, 8)],
-        'drop_unlab': [x / 10 for x in range(5, 9)],
+        # 'mask_ratio': [x / 10 for x in range(2, 10, 1)],
+        # 'drop_lab': [x / 10 for x in range(0, 8)],
+        # 'drop_unlab': [x / 10 for x in range(5, 9)],
         # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
         # "semi_supervised": [False], # for sup
         # "semi_supervised": [True], # for semi
@@ -556,18 +516,10 @@ if __name__ == '__main__':
     }
 
     datasets = opt.datasets.keys()
-    # parameter_explore(opt, ps)  # super dynamic choose
+    parameter_explore(opt, ps)  # super default lap
     # parameter_explore(opt, ps, datasets=datasets)  # super all
-    # parameter_explore(opt, ps,datasets=['laptop'])  # laptop
     # parameter_explore(opt, ps,datasets=['restaurant'])  # restaurant
 
-    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi  dynamic choose
-    # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=datasets)  # semi  dynamic choose
-    # parameter_explore(opt.set({"semi_supervised": True, 'unlabeled_loss': 'all'}), ps, datasets=['laptop'])  # semi lap
-    # parameter_explore(opt.set({"semi_supervised": True,'unlabeled_loss': 'all'}), ps,datasets=['restaurant'])  # semi res
+    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
+    # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=datasets)  # semi all
 
-    # main(opt_semi_res)
-
-    # main(opt_semi_lap)
-    # main(opt_res)
-    # main(opt_lap)
