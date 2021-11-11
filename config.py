@@ -52,8 +52,8 @@ PARAMETERS = {
     'weight_keep': True,
     # cvt
     'drop_lab': 0.1,
-    'drop_unlab': 0.6,
-    'unlabeled_loss': 'mask_strong',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
+    'drop_unlab': 0.4,
+    'unlabeled_loss': 'mask_weak',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
     'loss_alpha': 1,
     'loss_cal': 'kl'  # loss
 

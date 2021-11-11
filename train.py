@@ -506,8 +506,8 @@ if __name__ == '__main__':
         # 'encoder_hidden_size': [300,512, 1024],
         # 'mask_ratio': [x / 10 for x in range(2, 10, 1)],
         # 'drop_lab': [x / 10 for x in range(0, 8)],
-        # 'drop_unlab': [x / 10 for x in range(5, 9)],
-        # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
+        # 'drop_unlab': [x / 10 for x in range(3, 9)],
+        'drop_attention': [x / 10 for x in range(2, 10, 1)],
         # "semi_supervised": [False], # for sup
         # "semi_supervised": [True], # for semi
         # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
@@ -516,10 +516,10 @@ if __name__ == '__main__':
     }
 
     datasets = opt.datasets.keys()
-    parameter_explore(opt, ps)  # super default lap
+    # parameter_explore(opt, ps)  # super default lap
     # parameter_explore(opt, ps, datasets=datasets)  # super all
     # parameter_explore(opt, ps,datasets=['restaurant'])  # restaurant
 
-    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
+    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
     # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=datasets)  # semi all
 
