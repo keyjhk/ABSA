@@ -93,12 +93,8 @@ class Instructor:
         self.init_dataset()
         self.init_model()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
-        if self.semi_supervised:
-            self.patience = opt.semi_patience
-            self.optimizer = optim.Adam(_params, lr=opt.semi_lr, weight_decay=opt.semi_l2)
-        else:
-            self.patience = opt.patience
-            self.optimizer = optim.Adam(_params, lr=opt.lr, weight_decay=opt.l2)
+        self.patience = opt.patience
+        self.optimizer = optim.Adam(_params, lr=opt.lr, weight_decay=opt.l2)
         # logger
         self.logger = self.set_logger()
 

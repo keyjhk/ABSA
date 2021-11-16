@@ -32,8 +32,6 @@ PARAMETERS = {
     # reproduce
     'seed': 544,
     # optimizer
-    'semi_lr': 5e-4,  # 5e-4,
-    'semi_l2': 5e-3,  # 5e-3,
     'lr': 1e-3,  # 1e-3,
     'l2': 5e-3,  # 1e-2,
     # reset:
@@ -51,8 +49,8 @@ PARAMETERS = {
     'weight_alpha': 1,
     'weight_keep': True,
     # cvt
-    'drop_lab': 0.1,
-    'drop_unlab': 0.4,
+    'drop_lab': 0.3,
+    'drop_unlab': 0.6,
     'unlabeled_loss': 'mask_weak',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
     'loss_alpha': 1,
     'loss_cal': 'kl'  # loss
