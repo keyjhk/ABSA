@@ -56,7 +56,7 @@ class Option:
 
 
 class Instructor:
-    def __init__(self, opt):
+    def __init__(self, opt, logout=True):
         # set seed
         self.reproduce(opt)
         # attr
@@ -96,6 +96,7 @@ class Instructor:
         self.patience = opt.patience
         self.optimizer = optim.Adam(_params, lr=opt.lr, weight_decay=opt.l2)
         # logger
+        self.logout = logout
         self.logger = self.set_logger()
 
         self.clear()  # clear
@@ -206,7 +207,8 @@ class Instructor:
                                                self.model_name,
                                                strftime("%m%d-%H%M", localtime()))
         logger_name = '{}_{}'.format(self.opt.name, self.model_name)
-        return set_logger(name=logger_name, file=logger_file)
+        level = logging.INFO if self.logout else logging.WARNING
+        return set_logger(name=logger_name, file=logger_file, level=level)
 
     def _evaluate_acc_f1(self, dataloader):
         self.model.eval()
@@ -410,8 +412,32 @@ def plot(x, y, xlabel='', ylabel='', title=''):
     plt.show()
 
 
-def parameter_explore(opt, par_vals, datasets=['laptop']):
+def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False):
     # par_vals:{parameter_name:[val1,],...}
+    def is_valid_option(opt):
+        assert opt.semi_supervised == True
+        is_valid_opt = True
+        logger.info('comparing……'.center(30, '='))
+        for valid_ratio in [0.1, 0.3, 0.5, 0.7]:
+            # the difference between sup/sems is only the toggle of semi_supervised
+            # keep other settings same:drop_lab/drop_unlab/mask_ratio
+            # sup
+            opt = opt.set({'valid_ratio': valid_ratio})
+            _ins_sup = Instructor(opt.set({'semi_supervised': False}), logout=False)
+            res_sup = _ins_sup.run()
+            # semi
+            _ins_semi = Instructor(opt.set({'semi_supervised': True}), logout=False)
+            res_semi = _ins_semi.run()
+
+            logger.info(
+                'valid_ratio: {} semi_acc:{} super_acc :{}'.format(valid_ratio, res_semi['acc'], res_sup['acc'], ))
+            if res_semi['acc'] < res_sup['acc']:
+                logger.info('option:{} is dropped!'.format(opt.name).center(30, '='))
+                is_valid_opt = False
+                break
+        else:
+            logger.info('option:{} is valid!'.format(opt.name).center(30, '='))
+        return is_valid_opt
 
     logger_fname = 'p'
     for p in par_vals.keys():
@@ -445,7 +471,8 @@ def parameter_explore(opt, par_vals, datasets=['laptop']):
             if opt_name not in hy_params_his:  # check if has created before
                 hy_params_his.add(opt_name)
                 search_options.append(opt.set(hy_params, name=opt_name))
-
+    if semi_sup_compare:
+        logger.warning('have opened the semi_sup_compare!!!')
     search_results = {d: [] for d in datasets}
     best_result = 0
     best_params = None
@@ -457,6 +484,9 @@ def parameter_explore(opt, par_vals, datasets=['laptop']):
             results.append(res)
             vr = '[dataset]:{dataset} [{option}] [result]:{result}'.format(dataset=dataset, option=search_option.name,
                                                                            result=res)
+            if semi_sup_compare and not is_valid_option(search_option.set({'dataset': dataset})):
+                continue
+
             search_results[dataset].append(vr)
             logger.info(vr)
             acc = res['acc']
@@ -489,27 +519,16 @@ if __name__ == '__main__':
 
     # p
     ps = {
-        # 'weight_keep': [False],
-        # 'batch_size': [64],
-        # 'semi_lr': [1e-3,5e-4],
-        # 'semi_l2': [1e-2,5e-3],
+        # 'batch_size': [32,64],
         # 'lr': [1e-3, 5e-4],
         # 'l2': [1e-2, 5e-3],
-        # 'patience':range(10,40,5),
-        # 'pos_embedding_size':range(50,350,50),  # 50
-        # 'threshould': range(4, 10),
-        # 'weight_alpha': [x / 10 for x in range(1, 10, 2)],
-        # 'encoder_hidden_size': [300,512, 1024],
-        # 'mask_ratio': [x / 10 for x in range(2, 10, 1)],
-        # 'drop_lab': [x / 10 for x in range(0, 8)],
-        # 'drop_unlab': [x / 10 for x in range(3, 9)],
-
+        'threshould': range(4, 10),
+        'mask_ratio': [x / 10 for x in range(2, 10, 1)],
+        # 'drop_lab': [x / 10 for x in range(0, 5)],
+        # 'drop_unlab': [x / 10 for x in range(3, 8)],
         # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
-        # "semi_supervised": [False], # for sup
-        # "semi_supervised": [True], # for semi
         # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
-        # 'loss_alpha':[i/10 for i in range(0,12,2)],
-        'valid_ratio': [x/10 for x in range(0,10,2)]
+        # 'valid_ratio': [x / 10 for x in range(0, 10, 2)]
     }
 
     datasets = opt.datasets.keys()
@@ -517,6 +536,8 @@ if __name__ == '__main__':
     # parameter_explore(opt, ps, datasets=datasets)  # super all
     # parameter_explore(opt, ps,datasets=['restaurant'])  # restaurant
 
-    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
+    parameter_explore(opt.set({"semi_supervised": True}), ps,
+                      semi_sup_compare=True,
+                      datasets=['restaurant'])  # semi default lap
+    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
     # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=datasets)  # semi all
-
