@@ -1,5 +1,5 @@
 import sys
-from time import strftime, localtime
+from time import strftime, localtime, time
 import logging
 
 import numpy
@@ -13,6 +13,10 @@ import matplotlib.pyplot as plt
 from data_utils import *
 from models.cvt_model import CVTModel
 from config import PARAMETERS, EXCLUDE
+
+import warnings
+
+warnings.filterwarnings('ignore')
 
 
 class Option:
@@ -61,13 +65,15 @@ class Instructor:
         self.reproduce(opt)
         # attr
         self.opt = opt
-        self.batch_size = opt.batch_size
+        self.multi_gpus = True if opt.gpu_parallel and torch.cuda.device_count() > 1 else False
+        self.device = 'cuda:{}'.format(opt.device_ids[0]) if self.multi_gpus else opt.device
+        # train
+        self.batch_size = opt.batch_size if not self.multi_gpus else opt.batch_size * len(opt.device_ids)
         self.max_seq_len = opt.max_seq_len
         self.semi_supervised = opt.semi_supervised
         self.clear_model = opt.clear_model
 
         # train parameters
-        self.device = opt.device
         self.start_epoch = 0
         self.max_val_acc = 0
         self.max_val_f1 = 0
@@ -94,7 +100,8 @@ class Instructor:
         self.init_model()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
         self.patience = opt.patience
-        self.optimizer = optim.Adam(_params, lr=opt.lr, weight_decay=opt.l2)
+        lr = opt.lr if not self.multi_gpus else opt.lr * len(opt.device_ids)
+        self.optimizer = optim.Adam(_params, lr=lr, weight_decay=opt.l2)
         # logger
         self.logout = logout
         self.logger = self.set_logger()
@@ -105,7 +112,7 @@ class Instructor:
 
     def tip(self):
         self.logger.info('tips'.center(30, '='))
-        self.logger.info('sys:{}'.format(sys.platform))
+        self.logger.info('sys:{} multi_gpus:{}-{}'.format(sys.platform, self.multi_gpus, len(self.opt.device_ids)))
         opt = self.opt
         for x in opt:
             self.logger.info(x)
@@ -169,6 +176,7 @@ class Instructor:
     def init_model(self):
         opt = self.opt
         tokenizer = self.tokenizer
+
         self.model = CVTModel(num_pos=len(tokenizer.pos2idx),
                               num_polar=len(tokenizer.polar2idx),
                               num_position=tokenizer.max_seq_len,
@@ -176,9 +184,12 @@ class Instructor:
                               tokenizer=tokenizer,
                               opt=opt
                               ).to(self.device)
+
         self.model_name = self.model.name
         self.inputs_cols = self.model.inputs_cols
         self._reset_params()
+        if self.multi_gpus:
+            self.model = torch.nn.DataParallel(self.model, opt.device_ids)
 
     def _reset_params(self):
         initializers = {
@@ -220,6 +231,7 @@ class Instructor:
             for batch in dataloader:
                 inputs = [batch[col].to(self.device) for col in self.inputs_cols]
                 _loss, out, target = self.model(*inputs)  # out:batch,num_polar
+                _loss = _loss.mean() if self.multi_gpus else _loss
                 loss.append(_loss.item())
                 t_targets, t_outputs = target, out.argmax(dim=-1)  # batch
                 n_correct += (t_outputs == t_targets).sum().item()
@@ -245,7 +257,7 @@ class Instructor:
     def save(self, model, epoch, acc, f1):
         save_model_name = self.save_model_name
         states = {
-            'model': model.state_dict(),
+            'model': model.state_dict() if not self.multi_gpus else model.module.state_dict(),
             'optimizer': self.optimizer.state_dict(),
             'epoch': epoch,
             'acc': acc,
@@ -279,7 +291,10 @@ class Instructor:
             self.max_val_f1 = model_cpt['f1']
             self.max_val_acc = model_cpt['acc']
             # model/opt
-            self.model.load_state_dict(model_cpt['model'])
+            if not self.multi_gpus:
+                self.model.load_state_dict(model_cpt['model'])
+            else:
+                self.model.module.load_state_dict(model_cpt['model'])
             self.optimizer.load_state_dict(model_cpt['optimizer'])
 
     def clear(self):
@@ -313,6 +328,13 @@ class Instructor:
         return eval_res
 
     def run(self):
+        st = time()
+        res = self._run()
+        time_cost = int(time() - st)
+        res['time_cost'] = '{}m{}s'.format(time_cost // 60, time_cost % 60)
+        return res
+
+    def _run(self):
         self.logger.info('run models'.center(30, '='))
         step_every = self.opt.step_every
         print_every = self.opt.print_every
@@ -333,6 +355,7 @@ class Instructor:
             self.optimizer.zero_grad()
             inputs = [batch[col].to(self.device) for col in self.inputs_cols]
             loss, out, target = self.model(*inputs, mode=mode)
+            loss = loss.mean() if self.multi_gpus else loss
             loss.backward()
             self.optimizer.step()
 
@@ -415,16 +438,29 @@ def plot(x, y, xlabel='', ylabel='', title=''):
 def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False):
     # par_vals:{parameter_name:[val1,],...}
     def is_valid_option(opt):
-        assert opt.semi_supervised == True
         is_valid_opt = True
         logger.info('comparing……'.center(30, '='))
-        for valid_ratio in [0.1, 0.3, 0.5, 0.7]:
+
+        valid_ratios = [0.1, 0.3, 0.5, 0.7]
+        # only these factors influence supervised
+        valid_opt_name = '{lr}_{l2}_{drop_lab}'.format(lr=opt.lr, l2=opt.l2, drop_lab=opt.drop_lab)
+        if not semi_valid_ratio_scores.get(valid_opt_name):
+            semi_valid_ratio_scores[valid_opt_name] = {x: None for x in valid_ratios}
+        semi_scores = semi_valid_ratio_scores.get(valid_opt_name)  # {ratio:acc}
+
+        for valid_ratio in valid_ratios:
             # the difference between sup/sems is only the toggle of semi_supervised
             # keep other settings same:drop_lab/drop_unlab/mask_ratio
             # sup
             opt = opt.set({'valid_ratio': valid_ratio})
-            _ins_sup = Instructor(opt.set({'semi_supervised': False}), logout=False)
-            res_sup = _ins_sup.run()
+
+            if not semi_scores.get(valid_ratio):
+                _ins_sup = Instructor(opt.set({'semi_supervised': False}), logout=False)
+                res_sup = _ins_sup.run()
+                semi_scores[valid_ratio] = res_sup
+            else:
+                res_sup = semi_scores.get(valid_ratio)
+
             # semi
             _ins_semi = Instructor(opt.set({'semi_supervised': True}), logout=False)
             res_semi = _ins_semi.run()
@@ -472,6 +508,7 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
                 hy_params_his.add(opt_name)
                 search_options.append(opt.set(hy_params, name=opt_name))
     if semi_sup_compare:
+        semi_valid_ratio_scores = {}  # saved different scores with same options
         logger.warning('have opened the semi_sup_compare!!!')
     search_results = {d: [] for d in datasets}
     best_result = 0
@@ -482,8 +519,10 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
             _ins = Instructor(search_option.set({'dataset': dataset}))
             res = _ins.run()
             results.append(res)
-            vr = '[dataset]:{dataset} [{option}] [result]:{result}'.format(dataset=dataset, option=search_option.name,
-                                                                           result=res)
+            vr = 'multi_gpu:{} [dataset]:{dataset} [{option}] [result]:{result}'.format(_ins.multi_gpus,
+                                                                                        dataset=dataset,
+                                                                                        option=search_option.name,
+                                                                                        result=res)
             if semi_sup_compare and not is_valid_option(search_option.set({'dataset': dataset})):
                 continue
 
@@ -495,7 +534,7 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
                 best_params = vr
 
     logger.info('final results'.center(30, '*'))
-    logger.info('sys:{}'.format(sys.platform))
+    logger.info('sys:{}'.format(sys.platform, ))
     for d, res in search_results.items():
         # d:dataset res:List
         for r in res: logger.info(r)
@@ -519,25 +558,27 @@ if __name__ == '__main__':
 
     # p
     ps = {
-        # 'batch_size': [32,64],
-        # 'lr': [1e-3, 5e-4],
-        # 'l2': [1e-2, 5e-3],
-        'threshould': range(4, 10),
-        'mask_ratio': [x / 10 for x in range(2, 10, 1)],
-        # 'drop_lab': [x / 10 for x in range(0, 5)],
+        # 'batch_size': [32, 64],
+        # 'lr': [2e-3, 1e-3],
+        # 'l2': [1e-2, 5e-3, 1e-3],
+        # 'threshould': range(4, 10),
+        # 'mask_ratio': [x / 10 for x in range(2, 8)],
+        # 'drop_lab': [x / 10 for x in range(1, 6)],
         # 'drop_unlab': [x / 10 for x in range(3, 8)],
         # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
         # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
-        # 'valid_ratio': [x / 10 for x in range(0, 10, 2)]
+        # 'valid_ratio': [x / 10 for x in range(0, 10, 2)],
+        # 'semi_supervised':[True,False],
+        # 'gpu_parallel':[True,False]
     }
 
     datasets = opt.datasets.keys()
-    # parameter_explore(opt, ps)  # super default lap
+    parameter_explore(opt, ps)  # super default lap
     # parameter_explore(opt, ps, datasets=datasets)  # super all
     # parameter_explore(opt, ps,datasets=['restaurant'])  # restaurant
 
-    parameter_explore(opt.set({"semi_supervised": True}), ps,
-                      semi_sup_compare=True,
-                      datasets=['restaurant'])  # semi default lap
+    # parameter_explore(opt.set({"semi_supervised": True}), ps,
+    #                   semi_sup_compare=True,
+    #                   datasets=['laptop'])  # semi default laptop restaurant
     # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
     # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=datasets)  # semi all

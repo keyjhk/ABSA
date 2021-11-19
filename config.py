@@ -16,14 +16,16 @@ PARAMETERS = {
     },
     # train
     'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+    'gpu_parallel': False,
+    'device_ids': [7, 6, 5, 4],
     'print_every': 1,
-    'step_every': 0.25,  # 0<x<1 ,show progress when achieved
+    'step_every': 0.5,  # 0<x<1 ,show progress when achieved
     'patience': 10,  # early stop
     'batch_size': 32,
     'semi_supervised': False,
     'clear_model': True,  # clear saved models before run ,retrain ,prevent load
     'max_seq_len': 85,
-    'valid_ratio': 0,
+    'valid_ratio': 0.1,
     'dataset': 'laptop',
     "save_model_name": '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl',
     # eval
@@ -46,7 +48,7 @@ PARAMETERS = {
     'drop_attention': 0,
     'mask_ratio': 0.4,
     # cvt
-    'drop_lab': 0.4,
+    'drop_lab': 0.3,
     'drop_unlab': 0.5,
     'unlabeled_loss': 'mask_strong',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
 

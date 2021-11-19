@@ -59,8 +59,8 @@ class CVTModel(nn.Module):
                                     tokenizer=tokenizer)
 
         # auxiliary
-        self.mask_window = self.primary.clone('mask_window')
         self.mask_strong = self.primary.clone('mask_strong')
+        # self.mask_window = self.primary.clone('mask_window')
 
         self.name = self.encoder.name
 
@@ -119,14 +119,9 @@ class CVTModel(nn.Module):
             loss_ms = F.kl_div(out_ms.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
             # mask window
-            mask_window = (position_indices > self.threshould)[:max_x].unsqueeze(1)  # batch,1,seq_len
-            out_mww = self.mask_window(uni_primary, uni_hidden, mask_window)
-            loss_mww = F.kl_div(out_mww.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
             if self.unlabeled_loss == 'mask_strong':
                 loss = loss_ms
-            elif self.unlabeled_loss == 'mask_window':
-                loss = loss_mww
             elif self.unlabeled_loss == 'all':
                 loss = loss_ms
             else:
