@@ -327,14 +327,20 @@ class Instructor:
         self.logger.info(str(eval_res))
         return eval_res
 
-    def run(self):
-        st = time()
-        res = self._run()
-        time_cost = int(time() - st)
-        res['time_cost'] = '{}m{}s'.format(time_cost // 60, time_cost % 60)
-        return res
+    @staticmethod
+    def time_cal(func):
+        def inner(*args, **kwargs):
+            st = time()
+            res = func(*args, **kwargs)
+            time_cost = int(time() - st)
+            if isinstance(res,dict):
+                res['time_cost'] = '{}m{}s'.format(time_cost // 60, time_cost % 60)
+            return res
 
-    def _run(self):
+        return inner
+
+    @time_cal
+    def run(self):
         self.logger.info('run models'.center(30, '='))
         step_every = self.opt.step_every
         print_every = self.opt.print_every
@@ -348,6 +354,7 @@ class Instructor:
         train_steps = max(1, int(step_every * label_steps))  # how many steps then calculate the train acc/loss
         step = 0
         n_correct, n_total, loss_total = 0, 0, 0
+        epoch_time_costs = time()
         for batch, mode in self.mixloader.alternating_batch():
             if mode == 'labeled':
                 step += 1
@@ -380,7 +387,9 @@ class Instructor:
             # evaluate in valid
             if step % (print_every * label_steps) == 0:
                 acc, f1, loss = self._evaluate_acc_f1(self.validloader)
-                info = 'epoch:{} loss:{} acc:{}% f1:{} '.format(epoch, loss, acc, f1)
+                info = 'epoch:{} epoch_time:{}s loss:{} acc:{}% f1:{} '.format(epoch,
+                                                                               (time() - epoch_time_costs) // epoch,
+                                                                               loss, acc, f1)
                 print('=' * 30,
                       '\nVALID EVAL\n',
                       info + '\n',
@@ -564,21 +573,22 @@ if __name__ == '__main__':
         # 'threshould': range(4, 10),
         # 'mask_ratio': [x / 10 for x in range(2, 8)],
         # 'drop_lab': [x / 10 for x in range(1, 6)],
-        # 'drop_unlab': [x / 10 for x in range(3, 8)],
+        'drop_unlab': [x / 10 for x in range(3, 8)],
         # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
         # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
         # 'valid_ratio': [x / 10 for x in range(0, 10, 2)],
         # 'semi_supervised':[True,False],
-        # 'gpu_parallel':[True,False]
+        # 'gpu_parallel':[True,False],
+        # 'use_weight': [False, True]
     }
 
     datasets = opt.datasets.keys()
-    parameter_explore(opt, ps)  # super default lap
+    # parameter_explore(opt, ps)  # super default lap
     # parameter_explore(opt, ps, datasets=datasets)  # super all
-    # parameter_explore(opt, ps,datasets=['restaurant'])  # restaurant
+    # parameter_explore(opt, ps, datasets=['restaurant'])  # restaurant
 
-    # parameter_explore(opt.set({"semi_supervised": True}), ps,
-    #                   semi_sup_compare=True,
-    #                   datasets=['laptop'])  # semi default laptop restaurant
+    parameter_explore(opt.set({"semi_supervised": True}), ps,
+                      semi_sup_compare=True,
+                      datasets=['laptop'])  # semi default laptop restaurant
     # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
     # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=datasets)  # semi all

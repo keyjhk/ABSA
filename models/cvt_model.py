@@ -60,7 +60,7 @@ class CVTModel(nn.Module):
 
         # auxiliary
         self.mask_strong = self.primary.clone('mask_strong')
-        # self.mask_window = self.primary.clone('mask_window')
+        self.mask_window = self.primary.clone('mask_window')
 
         self.name = self.encoder.name
 
@@ -99,6 +99,7 @@ class CVTModel(nn.Module):
         # uni_out
         uni_out, uni_hidden = self.encoder(word, position, len_x, mode)
         uni_primary = uni_out[:, :, :self.encoder_hidden_size] + uni_out[:, :, self.encoder_hidden_size:]
+        uni_primary = self.dynamic_features(uni_primary, position_indices, len_x, kind='weight')
         uni_mask = self.dynamic_features(uni_primary, position_indices, len_x)
 
         # auxiliary modules out
@@ -157,14 +158,12 @@ class CVTModel(nn.Module):
             mask_r = mask_r[:, :max_x].unsqueeze(dim=2)
             return features * mask_r  # batch,seq,hidden_size
         elif kind == 'weight':
-            pass
             # dynamic weight decay
-            # # weight = (1 - torch.div(position_indices, max_seq_len)).to(device)  # batch,MAX_LEN ; MAX_LEN = 85
-            # weight = weight_alpha * (1 - torch.div(position_indices, len_x.unsqueeze(1))).to(device)  # batch,MAX_LEN
-            # if weight_keep:
-            #     weight = weight.masked_fill(position_indices <= window_size, 1)  # keep 1
-            # weight = weight[:, :max_x].unsqueeze(dim=2)  # batch,seq_len ,1
-            # return features * weight
+            weight = (1 - torch.div(position_indices, max_seq_len)).to(device)  # batch,MAX_LEN ; MAX_LEN = 85
+            # weight = (1 - torch.div(position_indices, len_x.unsqueeze(1))).to(device)  # batch,MAX_LEN
+            weight = weight.masked_fill(position_indices <= window_size, 1)  # keep windows=1 , batch,MAX_LEN
+            weight = weight[:, :max_x].unsqueeze(dim=2)  # batch,seq_len ,1
+            return features * weight
         else:
             raise Exception('error dynamic kind ')
 

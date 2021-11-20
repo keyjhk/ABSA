@@ -25,7 +25,7 @@ PARAMETERS = {
     'semi_supervised': False,
     'clear_model': True,  # clear saved models before run ,retrain ,prevent load
     'max_seq_len': 85,
-    'valid_ratio': 0.1,
+    'valid_ratio': 0,
     'dataset': 'laptop',
     "save_model_name": '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl',
     # eval
@@ -44,13 +44,14 @@ PARAMETERS = {
     "position_embedding_size": 50,
     "encoder_hidden_size": 300,
     # dynamic mask/weight
-    "threshould": 8,  # 26 lap,12 res
     'drop_attention': 0,
+    "threshould": 8,  # 26 lap,12 res
     'mask_ratio': 0.4,
     # cvt
-    'drop_lab': 0.3,
+    'drop_lab': 0.2,
     'drop_unlab': 0.5,
     'unlabeled_loss': 'mask_strong',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
+    'use_weight':False,
 
 }
 
