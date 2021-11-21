@@ -45,13 +45,12 @@ PARAMETERS = {
     "encoder_hidden_size": 300,
     # dynamic mask/weight
     'drop_attention': 0,
-    "threshould": 8,  # 26 lap,12 res
-    'mask_ratio': 0.4,
+    "threshould": 12,  # 26 lap,12 res
+    'mask_ratio': 0.2,
     # cvt
-    'drop_lab': 0.2,
-    'drop_unlab': 0.5,
+    'drop_lab': 0.4,
+    'drop_unlab': 0.4,
     'unlabeled_loss': 'mask_strong',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
-    'use_weight':False,
 
 }
 

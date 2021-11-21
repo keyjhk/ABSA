@@ -19,6 +19,18 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
+def time_cal(func):
+    def inner(*args, **kwargs):
+        st = time()
+        res = func(*args, **kwargs)
+        time_cost = int(time() - st)
+        if isinstance(res, dict):
+            res['time_cost'] = '{}m{}s'.format(time_cost // 60, time_cost % 60)
+        return res
+
+    return inner
+
+
 class Option:
     def __init__(self, options, name='default'):
         self.option = options
@@ -198,10 +210,10 @@ class Instructor:
             'orthogonal_': torch.nn.init.orthogonal_,
         }
         initailizer = initializers[opt.initializer]
-        print('reset params:'.center(30, '='))
+        # print('reset params:'.center(30, '='))
         for name, p in self.model.named_parameters():
             if 'word_embedding' in name:
-                print('skip reset parameter: {}'.format(name))
+                # print('skip reset parameter: {}'.format(name))
                 continue
             if p.requires_grad:
                 if len(p.shape) > 1:
@@ -210,7 +222,7 @@ class Instructor:
                     stdv = 1. / math.sqrt(p.shape[0])
                     torch.nn.init.uniform_(p, a=-stdv, b=stdv)
 
-        print('=' * 30)
+        # print('=' * 30)
 
     def set_logger(self):
         logger_file = '{}_{}_{}_{}.log'.format(self.opt.name,
@@ -327,18 +339,6 @@ class Instructor:
         self.logger.info(str(eval_res))
         return eval_res
 
-    @staticmethod
-    def time_cal(func):
-        def inner(*args, **kwargs):
-            st = time()
-            res = func(*args, **kwargs)
-            time_cost = int(time() - st)
-            if isinstance(res,dict):
-                res['time_cost'] = '{}m{}s'.format(time_cost // 60, time_cost % 60)
-            return res
-
-        return inner
-
     @time_cal
     def run(self):
         self.logger.info('run models'.center(30, '='))
@@ -381,8 +381,8 @@ class Instructor:
                 train_acc = 100 * n_correct / n_total
                 train_loss = loss_total / train_steps
                 n_correct, n_total, loss_total = 0, 0, 0
-                print('percent:{:.2f}%, loss:{:.4f}, acc:{:.2f}%'.format(percent, train_loss, train_acc))
-                print('-' * 30)
+                self.logger.info('percent:{:.2f}%, loss:{:.4f}, acc:{:.2f}%'.format(percent, train_loss, train_acc))
+                self.logger.info('-' * 30)
 
             # evaluate in valid
             if step % (print_every * label_steps) == 0:
@@ -390,11 +390,7 @@ class Instructor:
                 info = 'epoch:{} epoch_time:{}s loss:{} acc:{}% f1:{} '.format(epoch,
                                                                                (time() - epoch_time_costs) // epoch,
                                                                                loss, acc, f1)
-                print('=' * 30,
-                      '\nVALID EVAL\n',
-                      info + '\n',
-                      '=' * 30)
-                self.logger.info(info)  # >> to logger.txt
+                self.logger.info('=' * 30 + '\nVALID EVAL\n' + info + '\n' + '=' * 30)
 
                 if acc > max_val_acc:
                     max_val_acc = acc
@@ -450,7 +446,7 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
         is_valid_opt = True
         logger.info('comparing……'.center(30, '='))
 
-        valid_ratios = [0.1, 0.3, 0.5, 0.7]
+        valid_ratios = [0.1, 0.5, 0.7]
         # only these factors influence supervised
         valid_opt_name = '{lr}_{l2}_{drop_lab}'.format(lr=opt.lr, l2=opt.l2, drop_lab=opt.drop_lab)
         if not semi_valid_ratio_scores.get(valid_opt_name):
@@ -545,8 +541,8 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
     logger.info('final results'.center(30, '*'))
     logger.info('sys:{}'.format(sys.platform, ))
     for d, res in search_results.items():
-        # d:dataset res:List
-        for r in res: logger.info(r)
+        # d:dataset res:List[Str]
+        for r in sorted(res): logger.info(r)
     logger.info('*' * 30)
     logger.info('best params：{}'.format(best_params))
 
@@ -570,14 +566,14 @@ if __name__ == '__main__':
         # 'batch_size': [32, 64],
         # 'lr': [2e-3, 1e-3],
         # 'l2': [1e-2, 5e-3, 1e-3],
-        # 'threshould': range(4, 10),
-        # 'mask_ratio': [x / 10 for x in range(2, 8)],
+        # 'threshould': range(4, 20, 2),
+        # 'mask_ratio': [x / 10 for x in range(4, 6)],
         # 'drop_lab': [x / 10 for x in range(1, 6)],
-        'drop_unlab': [x / 10 for x in range(3, 8)],
+        # 'drop_unlab': [x / 10 for x in range(1, 8)],
         # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
         # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
-        # 'valid_ratio': [x / 10 for x in range(0, 10, 2)],
-        # 'semi_supervised':[True,False],
+        'valid_ratio': [x / 10 for x in range(0, 10, 2)],
+        # 'semi_supervised': [True, False],
         # 'gpu_parallel':[True,False],
         # 'use_weight': [False, True]
     }
@@ -587,8 +583,8 @@ if __name__ == '__main__':
     # parameter_explore(opt, ps, datasets=datasets)  # super all
     # parameter_explore(opt, ps, datasets=['restaurant'])  # restaurant
 
-    parameter_explore(opt.set({"semi_supervised": True}), ps,
-                      semi_sup_compare=True,
-                      datasets=['laptop'])  # semi default laptop restaurant
-    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
-    # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=datasets)  # semi all
+    # parameter_explore(opt.set({"semi_supervised": True}), ps,
+    #                   semi_sup_compare=True,
+    #                   datasets=['laptop'])  # semi default laptop restaurant
+    parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default lap
+    # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all

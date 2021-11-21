@@ -60,7 +60,7 @@ class CVTModel(nn.Module):
 
         # auxiliary
         self.mask_strong = self.primary.clone('mask_strong')
-        self.mask_window = self.primary.clone('mask_window')
+        self.wo_weight = self.primary.clone('wo_weight')  # withour might
 
         self.name = self.encoder.name
 
@@ -99,7 +99,7 @@ class CVTModel(nn.Module):
         # uni_out
         uni_out, uni_hidden = self.encoder(word, position, len_x, mode)
         uni_primary = uni_out[:, :, :self.encoder_hidden_size] + uni_out[:, :, self.encoder_hidden_size:]
-        uni_primary = self.dynamic_features(uni_primary, position_indices, len_x, kind='weight')
+        uni_weight = self.dynamic_features(uni_primary, position_indices, len_x, kind='weight')
         uni_mask = self.dynamic_features(uni_primary, position_indices, len_x)
 
         # auxiliary modules out
@@ -108,15 +108,16 @@ class CVTModel(nn.Module):
         if mode == "labeled":  # 监督训练
             self._unfreeze_model()
             # docoder primary
-            out = self.primary(uni_primary, uni_hidden)
+            out = self.primary(uni_weight, uni_hidden)
             loss = self.loss(out, polarity)
             return loss, out, polarity
         elif mode == "unlabeled":  # 无监督训练
             self._freeze_model()
-            label_primary = self.primary(uni_primary, uni_hidden)  # batch,num_polar
+            label_primary = self.primary(uni_weight, uni_hidden)  # batch,num_polar
             label_primary = label_primary.detach()
             # mask strong
-            out_ms = self.mask_strong(uni_mask, uni_hidden)  # batch,num_polar
+            # out_ms = self.mask_strong(uni_mask, uni_hidden)  # batch,num_polar
+            out_ms = self.wo_weight(uni_primary, uni_hidden)  # batch,num_polar ,not weighted
             loss_ms = F.kl_div(out_ms.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
             # mask window
@@ -154,7 +155,8 @@ class CVTModel(nn.Module):
             mask_r = torch.rand(position_indices.shape, device=device)  # batch,MAX_LEN
             mask_r = mask_r.masked_fill(mask_r < mask_ratio, 0)
             mask_r = mask_r.masked_fill(mask_r >= mask_ratio, 1)
-            mask_r = mask_r.masked_fill(position_indices <= window_size, 1)
+            # mask_r = mask_r.masked_fill(position_indices <= window_size, 1)  # inner window keep
+            mask_r = mask_r.masked_fill(position_indices > window_size, 1)   # outter window keep
             mask_r = mask_r[:, :max_x].unsqueeze(dim=2)
             return features * mask_r  # batch,seq,hidden_size
         elif kind == 'weight':
