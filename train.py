@@ -78,7 +78,8 @@ class Instructor:
         # attr
         self.opt = opt
         self.multi_gpus = True if opt.gpu_parallel and torch.cuda.device_count() > 1 else False
-        self.device = 'cuda:{}'.format(opt.device_ids[0]) if self.multi_gpus else opt.device
+        self.device = 'cuda:{}'.format(
+            opt.device_ids[0]) if 'cuda' in opt.device and torch.cuda.device_count() > 1 else opt.device
         # train
         self.batch_size = opt.batch_size if not self.multi_gpus else opt.batch_size * len(opt.device_ids)
         self.max_seq_len = opt.max_seq_len
@@ -94,6 +95,7 @@ class Instructor:
         self.dataset_files = opt.datasets
         self.datasetname = opt.dataset
         self.valid_ratio = opt.valid_ratio
+        self.unlabel_ratio = opt.unlabel_ratio
         self.trainset, self.validset, self.testset, self.unlabeledset = None, None, None, None
 
         self.trainloader, self.validloader, self.testloader = None, None, None
@@ -163,13 +165,16 @@ class Instructor:
         testset = ABSADataset(fname=test_fname, tokenizer=tokenizer)
 
         unlabelset = trainset if not self.semi_supervised else ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
-
+        if self.unlabel_ratio < 1:
+            unlabelset_len = int(len(unlabelset) * self.unlabel_ratio)
+            _, unlabelset = random_split(unlabelset, [len(unlabelset) - unlabelset_len, unlabelset_len])
         if valid_ratio > 0:
             valset_len = int(len(trainset) * valid_ratio)
             trainset, validset = random_split(trainset, [len(trainset) - valset_len, valset_len])
         else:
             validset = testset
 
+        validset = testset  # always set the  testset as validset
         # dataset
         self.trainset = trainset
         self.validset = validset
@@ -364,6 +369,7 @@ class Instructor:
             loss, out, target = self.model(*inputs, mode=mode)
             loss = loss.mean() if self.multi_gpus else loss
             loss.backward()
+
             self.optimizer.step()
 
             # progress
@@ -446,9 +452,11 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
         is_valid_opt = True
         logger.info('comparing……'.center(30, '='))
 
-        valid_ratios = [0.1, 0.5, 0.7]
+        valid_ratios = [0.25, 0.5, 0.75, 0]
         # only these factors influence supervised
-        valid_opt_name = '{lr}_{l2}_{drop_lab}'.format(lr=opt.lr, l2=opt.l2, drop_lab=opt.drop_lab)
+        valid_opt_name = '{lr}_{l2}_{window_weight}_{drop_lab}'.format(lr=opt.lr, l2=opt.l2,
+                                                                       window_weight=opt.window_weight,
+                                                                       drop_lab=opt.drop_lab)
         if not semi_valid_ratio_scores.get(valid_opt_name):
             semi_valid_ratio_scores[valid_opt_name] = {x: None for x in valid_ratios}
         semi_scores = semi_valid_ratio_scores.get(valid_opt_name)  # {ratio:acc}
@@ -512,6 +520,10 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
             if opt_name not in hy_params_his:  # check if has created before
                 hy_params_his.add(opt_name)
                 search_options.append(opt.set(hy_params, name=opt_name))
+
+    # filter drop_unlab <= drop_lab
+    search_options = filter(lambda option: option.drop_lab <= option.drop_unlab, search_options)
+
     if semi_sup_compare:
         semi_valid_ratio_scores = {}  # saved different scores with same options
         logger.warning('have opened the semi_sup_compare!!!')
@@ -566,25 +578,29 @@ if __name__ == '__main__':
         # 'batch_size': [32, 64],
         # 'lr': [2e-3, 1e-3],
         # 'l2': [1e-2, 5e-3, 1e-3],
-        # 'threshould': range(4, 20, 2),
-        # 'mask_ratio': [x / 10 for x in range(4, 6)],
-        # 'drop_lab': [x / 10 for x in range(1, 6)],
-        # 'drop_unlab': [x / 10 for x in range(1, 8)],
+        # 'encoder_hidden_size':[300,512,768,1024]
+        # 'window_weight': range(0, 10),
+        # 'window_mask': range(2, 7),
+        # 'mask_ratio': [x / 10 for x in range(3, 8)],
+        # 'drop_lab': [x / 10 for x in range(0, 6)],
+        # 'drop_unlab': [x / 10 for x in range(3, 8)],
         # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
         # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
-        'valid_ratio': [x / 10 for x in range(0, 10, 2)],
+        # 'valid_ratio': [x / 100 for x in range(0, 75, 25)],
+        'unlabel_len': [500,1000,5000,10000],
         # 'semi_supervised': [True, False],
         # 'gpu_parallel':[True,False],
         # 'use_weight': [False, True]
     }
 
     datasets = opt.datasets.keys()
-    # parameter_explore(opt, ps)  # super default lap
-    # parameter_explore(opt, ps, datasets=datasets)  # super all
+    # parameter_explore(opt, ps)  # super default lap  76.3
+    # parameter_explore(opt, ps , datasets=datasets)  # super all
     # parameter_explore(opt, ps, datasets=['restaurant'])  # restaurant
-
+    #
     # parameter_explore(opt.set({"semi_supervised": True}), ps,
     #                   semi_sup_compare=True,
-    #                   datasets=['laptop'])  # semi default laptop restaurant
-    parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default lap
-    # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all
+    #                   datasets=['restaurant'])  # semi default laptop restaurant
+    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
+    parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default res
+    # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all#

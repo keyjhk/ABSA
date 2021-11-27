@@ -17,7 +17,7 @@ PARAMETERS = {
     # train
     'device': 'cuda' if torch.cuda.is_available() else 'cpu',
     'gpu_parallel': False,
-    'device_ids': [7, 6, 5, 4],
+    'device_ids': [0, 6, 5, 7],
     'print_every': 1,
     'step_every': 0.5,  # 0<x<1 ,show progress when achieved
     'patience': 10,  # early stop
@@ -26,6 +26,7 @@ PARAMETERS = {
     'clear_model': True,  # clear saved models before run ,retrain ,prevent load
     'max_seq_len': 85,
     'valid_ratio': 0,
+    'unlabel_ratio': 1,
     'dataset': 'laptop',
     "save_model_name": '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl',
     # eval
@@ -34,7 +35,7 @@ PARAMETERS = {
     'seed': 544,
     # optimizer
     'lr': 1e-3,
-    'l2': 5e-3,
+    'l2': 5e-3,  # 5e-3,
     # reset:
     "initializer": "xavier_uniform_",
     # model
@@ -42,15 +43,16 @@ PARAMETERS = {
     "pos_embedding_size": 50,
     "polar_embedding_size": 50,
     "position_embedding_size": 50,
-    "encoder_hidden_size": 300,
+    "encoder_hidden_size": 300,  # 300
     # dynamic mask/weight
     'drop_attention': 0,
-    "threshould": 12,  # 26 lap,12 res
-    'mask_ratio': 0.2,
+    'window_weight': 0,
+    "window_mask": 6,  # 4 lap,2 res
+    'mask_ratio': 1,
     # cvt
     'drop_lab': 0.4,
-    'drop_unlab': 0.4,
-    'unlabeled_loss': 'mask_strong',  # 'mask_weak', mask_window  # mask_strong ,all,  weight
+    'drop_unlab': 0.7,
+    'unlabeled_loss': 'mask_strong',  # mask_window  # mask_strong ,all,  weight
 
 }
 

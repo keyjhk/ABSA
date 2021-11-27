@@ -30,10 +30,6 @@ class CVTModel(nn.Module):
         self.mode = mode
         self.tokenizer = tokenizer
         self.opt = opt
-        # dynamic features
-        self.threshould = opt.threshould
-        self.mask_ratio = opt.mask_ratio
-        self.drop_attention = opt.drop_attention
         # cvt
         self.unlabeled_loss = opt.unlabeled_loss
         # embedding for word/pos/polar
@@ -60,7 +56,7 @@ class CVTModel(nn.Module):
 
         # auxiliary
         self.mask_strong = self.primary.clone('mask_strong')
-        self.wo_weight = self.primary.clone('wo_weight')  # withour might
+        self.wo_weight = self.primary.clone('wo_weight')  # without weight
 
         self.name = self.encoder.name
 
@@ -100,7 +96,7 @@ class CVTModel(nn.Module):
         uni_out, uni_hidden = self.encoder(word, position, len_x, mode)
         uni_primary = uni_out[:, :, :self.encoder_hidden_size] + uni_out[:, :, self.encoder_hidden_size:]
         uni_weight = self.dynamic_features(uni_primary, position_indices, len_x, kind='weight')
-        uni_mask = self.dynamic_features(uni_primary, position_indices, len_x)
+        uni_mask = self.dynamic_features(uni_weight, position_indices, len_x)
 
         # auxiliary modules out
 
@@ -109,23 +105,27 @@ class CVTModel(nn.Module):
             self._unfreeze_model()
             # docoder primary
             out = self.primary(uni_weight, uni_hidden)
+            # out = self.primary(uni_primary, uni_hidden)
             loss = self.loss(out, polarity)
             return loss, out, polarity
         elif mode == "unlabeled":  # 无监督训练
             self._freeze_model()
-            label_primary = self.primary(uni_weight, uni_hidden)  # batch,num_polar
-            label_primary = label_primary.detach()
+            label_primary = self.primary(uni_weight, uni_hidden).detach()  # batch,num_polar
             # mask strong
-            # out_ms = self.mask_strong(uni_mask, uni_hidden)  # batch,num_polar
-            out_ms = self.wo_weight(uni_primary, uni_hidden)  # batch,num_polar ,not weighted
+            out_ms = self.mask_strong(uni_mask, uni_hidden)  # batch,num_polar,mask
+            out_mw = self.wo_weight(uni_primary, uni_hidden)  # batch,num_polar ,not weighted
+
+            loss_mw = F.kl_div(out_mw.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
             loss_ms = F.kl_div(out_ms.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
             # mask window
 
             if self.unlabeled_loss == 'mask_strong':
-                loss = loss_ms
+                # loss = loss_ms
+                loss = loss_mw
             elif self.unlabeled_loss == 'all':
-                loss = loss_ms
+                loss = loss_ms + loss_mw
+
             else:
                 raise Exception('invalid unlabeled loss')
 
@@ -133,9 +133,9 @@ class CVTModel(nn.Module):
 
     def dynamic_features(self, features, position_indices, len_x,
                          kind='mask'):
-        threshould = self.threshould
-        mask_ratio = self.mask_ratio
-        # weight_keep = self.weight_keep
+        window_weight = self.opt.window_weight
+        window_mask = self.opt.window_mask
+        mask_ratio = self.opt.mask_ratio
         max_seq_len = self.tokenizer.max_seq_len
 
         # features: batch,seq_len,hidden_size
@@ -147,23 +147,28 @@ class CVTModel(nn.Module):
 
         # cal window size
         window_size = torch.floor_divide(len_x, 1).unsqueeze(1)  # batch,1
-        threshould = torch.tensor([threshould] * mb, device=device).unsqueeze(1)  # batch,1;
-        window_size = torch.cat((window_size, threshould), dim=-1)  # batch,2
-        window_size = window_size.min(dim=-1, keepdim=True)[0]  # batch,1
+        # mask
+
         if kind == 'mask':
             # mask over threshoulds
+            window_mask = torch.tensor([window_mask] * mb, device=device).unsqueeze(1)
+            window_mask = torch.cat((window_size, window_mask), dim=-1).min(dim=-1, keepdim=True)[0]  # batch,1
+
             mask_r = torch.rand(position_indices.shape, device=device)  # batch,MAX_LEN
             mask_r = mask_r.masked_fill(mask_r < mask_ratio, 0)
             mask_r = mask_r.masked_fill(mask_r >= mask_ratio, 1)
-            # mask_r = mask_r.masked_fill(position_indices <= window_size, 1)  # inner window keep
-            mask_r = mask_r.masked_fill(position_indices > window_size, 1)   # outter window keep
+            mask_r = mask_r.masked_fill(position_indices <= window_mask, 1)  # keep words inner windows=1
             mask_r = mask_r[:, :max_x].unsqueeze(dim=2)
             return features * mask_r  # batch,seq,hidden_size
         elif kind == 'weight':
             # dynamic weight decay
+            # weight
+            window_weight = torch.tensor([window_weight] * mb, device=device).unsqueeze(1)
+            window_weight = torch.cat((window_size, window_weight), dim=-1).min(dim=-1, keepdim=True)[0]  # batch,1
+
             weight = (1 - torch.div(position_indices, max_seq_len)).to(device)  # batch,MAX_LEN ; MAX_LEN = 85
             # weight = (1 - torch.div(position_indices, len_x.unsqueeze(1))).to(device)  # batch,MAX_LEN
-            weight = weight.masked_fill(position_indices <= window_size, 1)  # keep windows=1 , batch,MAX_LEN
+            weight = weight.masked_fill(position_indices <= window_weight, 1)  # keep windows=1 , batch,MAX_LEN
             weight = weight[:, :max_x].unsqueeze(dim=2)  # batch,seq_len ,1
             return features * weight
         else:
