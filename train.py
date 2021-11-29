@@ -95,7 +95,7 @@ class Instructor:
         self.dataset_files = opt.datasets
         self.datasetname = opt.dataset
         self.valid_ratio = opt.valid_ratio
-        self.unlabel_ratio = opt.unlabel_ratio
+        self.unlabel_len = opt.unlabel_len
         self.trainset, self.validset, self.testset, self.unlabeledset = None, None, None, None
 
         self.trainloader, self.validloader, self.testloader = None, None, None
@@ -165,9 +165,9 @@ class Instructor:
         testset = ABSADataset(fname=test_fname, tokenizer=tokenizer)
 
         unlabelset = trainset if not self.semi_supervised else ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
-        if self.unlabel_ratio < 1:
-            unlabelset_len = int(len(unlabelset) * self.unlabel_ratio)
-            _, unlabelset = random_split(unlabelset, [len(unlabelset) - unlabelset_len, unlabelset_len])
+        if self.unlabel_len is not None:
+            unlabel_len = min(self.unlabel_len, len(unlabelset))
+            _, unlabelset = random_split(unlabelset, [len(unlabelset) - unlabel_len, unlabel_len])
         if valid_ratio > 0:
             valset_len = int(len(trainset) * valid_ratio)
             trainset, validset = random_split(trainset, [len(trainset) - valset_len, valset_len])
@@ -554,7 +554,8 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
     logger.info('sys:{}'.format(sys.platform, ))
     for d, res in search_results.items():
         # d:dataset res:List[Str]
-        for r in sorted(res): logger.info(r)
+        res = sorted(res) if len(par_vals) > 1 else res  # random search ,then sort the results
+        for r in res: logger.info(r)
     logger.info('*' * 30)
     logger.info('best params：{}'.format(best_params))
 
@@ -576,18 +577,18 @@ if __name__ == '__main__':
     # p
     ps = {
         # 'batch_size': [32, 64],
-        # 'lr': [2e-3, 1e-3],
-        # 'l2': [1e-2, 5e-3, 1e-3],
+        # 'lr': [1e-2, 1e-3, 1e-4],
+        # 'l2': [5e-3, 1e-3, 5e-4,1e-4,5e-5,1e-5],
         # 'encoder_hidden_size':[300,512,768,1024]
         # 'window_weight': range(0, 10),
-        # 'window_mask': range(2, 7),
+        # 'window_mask': range(2, 9),
         # 'mask_ratio': [x / 10 for x in range(3, 8)],
-        # 'drop_lab': [x / 10 for x in range(0, 6)],
-        # 'drop_unlab': [x / 10 for x in range(3, 8)],
+        'drop_lab': [x / 10 for x in range(0, 6)],
+        'drop_unlab': [x / 10 for x in range(3, 8)],
         # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
         # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
         # 'valid_ratio': [x / 100 for x in range(0, 75, 25)],
-        'unlabel_len': [500,1000,5000,10000],
+        # 'unlabel_len': [500, 1000, 5000, 10000, 20000],
         # 'semi_supervised': [True, False],
         # 'gpu_parallel':[True,False],
         # 'use_weight': [False, True]
@@ -598,9 +599,9 @@ if __name__ == '__main__':
     # parameter_explore(opt, ps , datasets=datasets)  # super all
     # parameter_explore(opt, ps, datasets=['restaurant'])  # restaurant
     #
-    # parameter_explore(opt.set({"semi_supervised": True}), ps,
-    #                   semi_sup_compare=True,
-    #                   datasets=['restaurant'])  # semi default laptop restaurant
+    parameter_explore(opt.set({"semi_supervised": True}), ps,
+                      semi_sup_compare=True,
+                      datasets=['laptop'])  # semi default laptop restaurant
     # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
-    parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default res
+    # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default res
     # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all#
