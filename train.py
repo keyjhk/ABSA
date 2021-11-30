@@ -118,8 +118,8 @@ class Instructor:
         self.logout = logout
         self.logger = self.set_logger()
 
-        self.clear()  # clear
-        self.load()  # load
+        self.clear()
+        self.load()
         self.tip()
 
     def tip(self):
@@ -317,12 +317,12 @@ class Instructor:
                 self.logger.info('remove {}'.format(p))
         self.logger.info('=' * 30)
 
-    def eval(self):
-        # in testloader
+    def eval(self, dataloader=None):
+        dataloader = self.testloader if dataloader is None else dataloader
         acc, f1, loss = 0, 0, 0
         times = self.opt.eval_times
         for t in range(times):
-            _acc, _f1, _loss = self._evaluate_acc_f1(self.testloader)
+            _acc, _f1, _loss = self._evaluate_acc_f1(dataloader)
             acc += _acc
             f1 += _f1
             loss += _loss
@@ -331,8 +331,13 @@ class Instructor:
         loss = round(loss / times, 4)
 
         eval_res = {'loss': loss, 'acc': acc, 'f1': f1}
-        self.logger.info('TEST EVAL'.center(30, '='))
-        self.logger.info(str(eval_res))
+        if dataloader is self.testloader:
+            self.logger.info('TEST EVAL'.center(30, '='))
+            self.logger.info(str(eval_res))
+        else:
+            self.logger.info('VALID EVAL'.center(30, '='))
+            self.logger.info(str(eval_res))
+
         return eval_res
 
     @time_cal
@@ -355,11 +360,10 @@ class Instructor:
             if mode == 'labeled':
                 step += 1
             self.model.train()
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad()  # set_to_none=True
             inputs = [batch[col].to(self.device) for col in self.inputs_cols]
             loss, out, target = self.model(*inputs, mode=mode)
             loss.backward()
-
             self.optimizer.step()
 
             # progress
@@ -382,6 +386,8 @@ class Instructor:
 
             # evaluate in valid
             if step % (print_every * label_steps) == 0:
+                # valid_res = self.eval(self.validloader)
+                # acc, f1, loss = valid_res['acc'],valid_res['f1'],valid_res['loss']
                 acc, f1, loss = self._evaluate_acc_f1(self.validloader)
                 info = 'epoch:{} epoch_time:{}s loss:{} acc:{}% f1:{} '.format(epoch,
                                                                                (time() - epoch_time_costs) // epoch,
@@ -527,8 +533,8 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
             res = _ins.run()
             results.append(res)
             vr = '[dataset]:{dataset} [{option}] [result]:{result}'.format(dataset=dataset,
-                                                                                        option=search_option.name,
-                                                                                        result=res)
+                                                                           option=search_option.name,
+                                                                           result=res)
             if semi_sup_compare and not is_valid_option(search_option.set({'dataset': dataset})):
                 continue
 
@@ -588,9 +594,9 @@ if __name__ == '__main__':
     # parameter_explore(opt, ps , datasets=datasets)  # super all
     # parameter_explore(opt, ps, datasets=['restaurant'])  # restaurant
     #
-    # parameter_explore(opt.set({"semi_supervised": True}), ps,
-    #                   semi_sup_compare=True,
-    #                   datasets=['laptop'])  # semi default laptop restaurant
-    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
+    parameter_explore(opt.set({"semi_supervised": True}), ps,
+                      semi_sup_compare=True,
+                      datasets=['laptop'])  # semi default laptop restaurant
+    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
     # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default res
     # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all#

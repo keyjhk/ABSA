@@ -100,7 +100,6 @@ class CVTModel(nn.Module):
 
         # auxiliary modules out
 
-        loss = 0
         if mode == "labeled":  # 监督训练
             self._unfreeze_model()
             # docoder primary
@@ -121,8 +120,8 @@ class CVTModel(nn.Module):
             # mask window
 
             if self.unlabeled_loss == 'mask_strong':
-                loss = loss_ms
-                # loss = loss_mw
+                # loss = loss_ms
+                loss = loss_mw
             elif self.unlabeled_loss == 'all':
                 loss = loss_ms + loss_mw
 
