@@ -77,11 +77,10 @@ class Instructor:
         self.reproduce(opt)
         # attr
         self.opt = opt
-        self.multi_gpus = True if opt.gpu_parallel and torch.cuda.device_count() > 1 else False
         self.device = 'cuda:{}'.format(
             opt.device_ids[0]) if 'cuda' in opt.device and torch.cuda.device_count() > 1 else opt.device
         # train
-        self.batch_size = opt.batch_size if not self.multi_gpus else opt.batch_size * len(opt.device_ids)
+        self.batch_size = opt.batch_size
         self.max_seq_len = opt.max_seq_len
         self.semi_supervised = opt.semi_supervised
         self.clear_model = opt.clear_model
@@ -114,8 +113,7 @@ class Instructor:
         self.init_model()
         _params = filter(lambda p: p.requires_grad, self.model.parameters())
         self.patience = opt.patience
-        lr = opt.lr if not self.multi_gpus else opt.lr * len(opt.device_ids)
-        self.optimizer = optim.Adam(_params, lr=lr, weight_decay=opt.l2)
+        self.optimizer = optim.Adam(_params, lr=opt.lr, weight_decay=opt.l2)
         # logger
         self.logout = logout
         self.logger = self.set_logger()
@@ -126,7 +124,7 @@ class Instructor:
 
     def tip(self):
         self.logger.info('tips'.center(30, '='))
-        self.logger.info('sys:{} multi_gpus:{}-{}'.format(sys.platform, self.multi_gpus, len(self.opt.device_ids)))
+        self.logger.info('sys:{}'.format(sys.platform, len(self.opt.device_ids)))
         opt = self.opt
         for x in opt:
             self.logger.info(x)
@@ -163,16 +161,14 @@ class Instructor:
         unlabel_fname = self.dataset_files[self.datasetname]['unlabeled']
         trainset = ABSADataset(fname=train_fname, tokenizer=tokenizer)
         testset = ABSADataset(fname=test_fname, tokenizer=tokenizer)
-
-        unlabelset = trainset if not self.semi_supervised else ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
+        unlabelset = ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
         if self.unlabel_len is not None:
             unlabel_len = min(self.unlabel_len, len(unlabelset))
             _, unlabelset = random_split(unlabelset, [len(unlabelset) - unlabel_len, unlabel_len])
-        if valid_ratio > 0:
+
+        if valid_ratio > 0:  # split trainset
             valset_len = int(len(trainset) * valid_ratio)
             trainset, validset = random_split(trainset, [len(trainset) - valset_len, valset_len])
-        else:
-            validset = testset
 
         validset = testset  # always set the  testset as validset
         # dataset
@@ -205,8 +201,6 @@ class Instructor:
         self.model_name = self.model.name
         self.inputs_cols = self.model.inputs_cols
         self._reset_params()
-        if self.multi_gpus:
-            self.model = torch.nn.DataParallel(self.model, opt.device_ids)
 
     def _reset_params(self):
         initializers = {
@@ -248,7 +242,6 @@ class Instructor:
             for batch in dataloader:
                 inputs = [batch[col].to(self.device) for col in self.inputs_cols]
                 _loss, out, target = self.model(*inputs)  # out:batch,num_polar
-                _loss = _loss.mean() if self.multi_gpus else _loss
                 loss.append(_loss.item())
                 t_targets, t_outputs = target, out.argmax(dim=-1)  # batch
                 n_correct += (t_outputs == t_targets).sum().item()
@@ -274,7 +267,7 @@ class Instructor:
     def save(self, model, epoch, acc, f1):
         save_model_name = self.save_model_name
         states = {
-            'model': model.state_dict() if not self.multi_gpus else model.module.state_dict(),
+            'model': model.state_dict(),
             'optimizer': self.optimizer.state_dict(),
             'epoch': epoch,
             'acc': acc,
@@ -308,10 +301,8 @@ class Instructor:
             self.max_val_f1 = model_cpt['f1']
             self.max_val_acc = model_cpt['acc']
             # model/opt
-            if not self.multi_gpus:
-                self.model.load_state_dict(model_cpt['model'])
-            else:
-                self.model.module.load_state_dict(model_cpt['model'])
+            self.model.load_state_dict(model_cpt['model'])
+
             self.optimizer.load_state_dict(model_cpt['optimizer'])
 
     def clear(self):
@@ -367,7 +358,6 @@ class Instructor:
             self.optimizer.zero_grad()
             inputs = [batch[col].to(self.device) for col in self.inputs_cols]
             loss, out, target = self.model(*inputs, mode=mode)
-            loss = loss.mean() if self.multi_gpus else loss
             loss.backward()
 
             self.optimizer.step()
@@ -536,8 +526,7 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
             _ins = Instructor(search_option.set({'dataset': dataset}))
             res = _ins.run()
             results.append(res)
-            vr = 'multi_gpu:{} [dataset]:{dataset} [{option}] [result]:{result}'.format(_ins.multi_gpus,
-                                                                                        dataset=dataset,
+            vr = '[dataset]:{dataset} [{option}] [result]:{result}'.format(dataset=dataset,
                                                                                         option=search_option.name,
                                                                                         result=res)
             if semi_sup_compare and not is_valid_option(search_option.set({'dataset': dataset})):
@@ -583,8 +572,8 @@ if __name__ == '__main__':
         # 'window_weight': range(0, 10),
         # 'window_mask': range(2, 9),
         # 'mask_ratio': [x / 10 for x in range(3, 8)],
-        'drop_lab': [x / 10 for x in range(0, 6)],
-        'drop_unlab': [x / 10 for x in range(3, 8)],
+        # 'drop_lab': [x / 10 for x in range(0, 6)],
+        # 'drop_unlab': [x / 10 for x in range(3, 8)],
         # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
         # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
         # 'valid_ratio': [x / 100 for x in range(0, 75, 25)],
@@ -599,9 +588,9 @@ if __name__ == '__main__':
     # parameter_explore(opt, ps , datasets=datasets)  # super all
     # parameter_explore(opt, ps, datasets=['restaurant'])  # restaurant
     #
-    parameter_explore(opt.set({"semi_supervised": True}), ps,
-                      semi_sup_compare=True,
-                      datasets=['laptop'])  # semi default laptop restaurant
-    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
+    # parameter_explore(opt.set({"semi_supervised": True}), ps,
+    #                   semi_sup_compare=True,
+    #                   datasets=['laptop'])  # semi default laptop restaurant
+    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
     # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default res
     # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all#
