@@ -79,6 +79,7 @@ class Instructor:
         self.opt = opt
         self.device = 'cuda:{}'.format(
             opt.device_ids[0]) if 'cuda' in opt.device and torch.cuda.device_count() > 1 else opt.device
+        self.run_time = int(time())
         # train
         self.batch_size = opt.batch_size
         self.max_seq_len = opt.max_seq_len
@@ -118,7 +119,7 @@ class Instructor:
         self.logout = logout
         self.logger = self.set_logger()
 
-        self.clear()
+        # self.clear()
         self.load()
         self.tip()
 
@@ -273,7 +274,7 @@ class Instructor:
             'acc': acc,
             'f1': f1,
         }
-        fname = save_model_name.format(dataset=self.datasetname,
+        fname = save_model_name.format(time=self.run_time,dataset=self.datasetname,
                                        model=self.model_name, epoch=epoch,
                                        acc=acc, f1=f1
                                        )
@@ -282,7 +283,9 @@ class Instructor:
         torch.save(states, open('state/' + fname, 'wb'))
 
     def get_model_cpt(self):
-        model_pattern = r'{}_{}_epoch.+'.format(self.datasetname, self.model_name)
+        # {dataset}_{time}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl
+        # model_pattern = r'{}_{}_epoch.+'.format(self.datasetname, self.model_name)
+        model_pattern = r'{}_{}_{}_epoch.+'.format(self.datasetname,self.run_time, self.model_name)
         return list(filter(lambda x: re.match(model_pattern, x),
                            os.listdir('state')))
 
@@ -334,9 +337,6 @@ class Instructor:
         if dataloader is self.testloader:
             self.logger.info('TEST EVAL'.center(30, '='))
             self.logger.info(str(eval_res))
-        else:
-            self.logger.info('VALID EVAL'.center(30, '='))
-            self.logger.info(str(eval_res))
 
         return eval_res
 
@@ -386,9 +386,9 @@ class Instructor:
 
             # evaluate in valid
             if step % (print_every * label_steps) == 0:
-                # valid_res = self.eval(self.validloader)
-                # acc, f1, loss = valid_res['acc'],valid_res['f1'],valid_res['loss']
-                acc, f1, loss = self._evaluate_acc_f1(self.validloader)
+                valid_res = self.eval(self.validloader)
+                acc, f1, loss = valid_res['acc'], valid_res['f1'], valid_res['loss']
+                # acc, f1, loss = self._evaluate_acc_f1(self.validloader)
                 info = 'epoch:{} epoch_time:{}s loss:{} acc:{}% f1:{} '.format(epoch,
                                                                                (time() - epoch_time_costs) // epoch,
                                                                                loss, acc, f1)
@@ -406,6 +406,7 @@ class Instructor:
                 break
 
         self.load()
+        self.clear()  # clear saved models produced at this running time
         return self.eval()
 
 
@@ -574,12 +575,11 @@ if __name__ == '__main__':
         # 'batch_size': [32, 64],
         # 'lr': [1e-2, 1e-3, 1e-4],
         # 'l2': [5e-3, 1e-3, 5e-4,1e-4,5e-5,1e-5],
-        # 'encoder_hidden_size':[300,512,768,1024]
-        # 'window_weight': range(0, 10),
+        # 'encoder_hidden_size':[1024]
+        # 'window_weight': range(0, 10,2),
         # 'window_mask': range(2, 9),
         # 'mask_ratio': [x / 10 for x in range(3, 8)],
-        # 'drop_lab': [x / 10 for x in range(0, 6)],
-        # 'drop_unlab': [x / 10 for x in range(3, 8)],
+        'drop_unlab': [x / 10 for x in range(3, 8)],
         # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
         # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
         # 'valid_ratio': [x / 100 for x in range(0, 75, 25)],
@@ -590,13 +590,13 @@ if __name__ == '__main__':
     }
 
     datasets = opt.datasets.keys()
-    # parameter_explore(opt, ps)  # super default lap  76.3
+    # parameter_explore(opt, ps)  # super default lap
     # parameter_explore(opt, ps , datasets=datasets)  # super all
     # parameter_explore(opt, ps, datasets=['restaurant'])  # restaurant
-    #
-    parameter_explore(opt.set({"semi_supervised": True}), ps,
-                      semi_sup_compare=True,
-                      datasets=['laptop'])  # semi default laptop restaurant
-    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
+
+    # parameter_explore(opt.set({"semi_supervised": True}), ps,
+    #                   semi_sup_compare=True,
+    #                   datasets=['laptop'])  # semi default laptop restaurant
+    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
     # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default res
     # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all#

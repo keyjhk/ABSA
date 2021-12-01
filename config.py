@@ -28,14 +28,14 @@ PARAMETERS = {
     'valid_ratio': 0,
     'unlabel_len': None,
     'dataset': 'laptop',
-    "save_model_name": '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl',
+    "save_model_name": '{dataset}_{time}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl',
     # eval
     'eval_times': 3,
     # reproduce
     'seed': 544,
     # optimizer
     'lr': 1e-3,
-    'l2': 5e-3,#5e-3,
+    'l2': 5e-3,
     # reset:
     "initializer": "xavier_uniform_",
     # model
@@ -46,7 +46,7 @@ PARAMETERS = {
     "encoder_hidden_size": 300,  # 300
     # dynamic mask/weight
     'drop_attention': 0,
-    'window_weight': 0,
+    'window_weight': 2,
     "window_mask": 3,  # 3 lap,4 res
     'mask_ratio': 1,
     # cvt
