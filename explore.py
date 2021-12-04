@@ -135,7 +135,7 @@ if __name__ == '__main__':
         # 'lr': [1e-2, 1e-3, 1e-4],
         # 'l2': [5e-3, 1e-3, 5e-4,1e-4,5e-5,1e-5],
         # 'encoder_hidden_size':[300,512,768,1024]
-        'window_weight': range(0, 10,2),
+        # 'window_weight': range(0, 10,2),
         # 'mask_ratio': [x / 10 for x in range(3, 8)],
         # 'drop_lab': [x / 10 for x in range(1, 6)],
         # 'drop_unlab': [x / 10 for x in range(3, 9)],
@@ -153,6 +153,7 @@ if __name__ == '__main__':
     # parameter_explore(opt.set({"semi_supervised": True}), ps,
     #                   semi_sup_compare=True,
     #                   datasets=['laptop'])  # semi default laptop restaurant
-    # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
-    parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default res
+    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
+    # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default res
+    # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all#
     # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all#

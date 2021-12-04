@@ -52,7 +52,7 @@ PARAMETERS = {
     'mask_ratio': 1,
     # cvt
     'drop_lab': 0.1,
-    'drop_unlab': 0.4,  # 6 for lap,4 for res
+    'drop_unlab': 0.6,  # 0.6 for lap,0.4 for res
     'unlabeled_loss': 'mask_strong',  # mask_window  # mask_strong ,all,  weight
 
 }

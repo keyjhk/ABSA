@@ -46,6 +46,7 @@ PAD_TOKEN = "<PAD>"
 SOS_TOKEN = "<SOS>"
 EOS_TOKEN = "<EOS>"
 SPECIAL_TOKENS = [PAD_TOKEN, UNK_TOKEN, SOS_TOKEN, EOS_TOKEN]  # PAD is the first,so its index is 0
+ASPECT_REPLACE_TOKEN = '$T$'
 
 # polarity
 NEG_LABEL = 'NEG'
@@ -147,7 +148,7 @@ def build_tokenizer(max_seq_len, dat_fname='state/tokenizer.pkl',
 
     print('vocab size:{}'.format(len(tokenizer.word2idx)))
 
-    return tokenizer  # 返回分词器
+    return tokenizer
 
 
 def build_embedding_matrix(word2idx, embed_dim=300, dat_fname='state/embedding_matatrix.pkl'):
@@ -235,7 +236,7 @@ class Tokenizer(object):
                 context = f.readline().rstrip()
                 if context:
                     ctr += 1
-                    text_left, _, text_right = [s.lower().strip() for s in context.partition("$T$")]
+                    text_left, _, text_right = [s.lower().strip() for s in context.partition(ASPECT_REPLACE_TOKEN)]
                     aspect = f.readline().rstrip().lower()  #
                     f.readline().rstrip()  # skip polarity/null
                     yield text_left + " " + aspect + " " + text_right
@@ -314,11 +315,9 @@ class Tokenizer(object):
         return pad_and_truncate(pos_seq, self.max_seq_len, value=self.pos2idx[OTHER_LABEL]), \
                pad_and_truncate(polar_seq, self.max_seq_len, value=self.polar2idx[NEU_LABEL])
 
-    def text_to_sequence(self, text, add_eos=False):
+    def text_to_sequence(self, text):
         words = self.tokenize(text)
         sequence = [self.word2idx[w] if w in self.word2idx else self.word2idx[UNK_TOKEN] for w in words]
-        if add_eos:
-            sequence.append(self.word2idx[EOS_TOKEN])
         # nparray : MAX_LENGTH
         return pad_and_truncate(sequence, self.max_seq_len, value=self.word2idx[PAD_TOKEN])
 
@@ -328,19 +327,17 @@ class Tokenizer(object):
         return ' '.join(str(idx2char[idx]) for idx in sequence if idx != skip_word)
 
 
-def build_indices(tokenizer, context, aspect, polarity, add_eos=False):
-    # context : str, .... '$' .....
+def build_indices(tokenizer, context, aspect, polarity, partition_token=ASPECT_REPLACE_TOKEN):
+    # context : str, .... '$T$' .....
     # aspect  : str,one or more words ;   polarity :str,number
-    # add_eos :add eos token if True
-    text_left, _, text_right = [s.strip() for s in context.partition(aspect)]
+    text_left, _, text_right = [s.strip() for s in context.partition(partition_token)]
     context = text_left + " " + aspect + " " + text_right
 
     # text(no aspect),context(text with aspect)
     pad_idx = tokenizer.word2idx[PAD_TOKEN]
 
-    text_indices = tokenizer.text_to_sequence(text_left + " " + aspect + " " + text_right,
-                                              add_eos=add_eos)
-    context_indices = tokenizer.text_to_sequence(context, add_eos=add_eos)
+    text_indices = tokenizer.text_to_sequence(text_left + " " + aspect + " " + text_right)
+    context_indices = tokenizer.text_to_sequence(context)
     context_len = np.sum(context_indices != pad_idx)
     left_indices = tokenizer.text_to_sequence(text_left)
     right_indices = tokenizer.text_to_sequence(text_right)
@@ -354,7 +351,7 @@ def build_indices(tokenizer, context, aspect, polarity, add_eos=False):
     position_indices = tokenizer.text_to_position(context_len, aspect_boundary)
 
     return {'text_indices': text_indices, 'context_indices': context_indices,
-            'len_s':context_len,
+            'context':context,'len_s': context_len,
             'left_indices': left_indices, 'right_indices': right_indices,
             'aspect_indices': aspect_indices, 'aspect_boundary': aspect_boundary,
             'polarity': polarity, 'context_len': context_len,
@@ -362,7 +359,7 @@ def build_indices(tokenizer, context, aspect, polarity, add_eos=False):
 
 
 class ABSADataset(Dataset):
-    def __init__(self, fname, tokenizer, write_file=False, combine=False):
+    def __init__(self, fname, tokenizer, write_file=False):
         # data
         self.all_data = {}  #
         self.data = []  # for iterater
@@ -377,7 +374,6 @@ class ABSADataset(Dataset):
         self.dat_fname = 'state/absa_dataset_{}.pkl'.format(self.dataset_name)  # for save/load
         # tokenize
         self.tokenizer = tokenizer
-        self.combine = combine  # 是否合并一句话里的多个aspect
 
         if os.path.exists(self.dat_fname):
             self.load_dataset()
@@ -412,50 +408,28 @@ class ABSADataset(Dataset):
         :return: alldata
         '''
         all_data = {}
-        tokenizer = self.tokenizer
-        combine = self.combine
         with open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore') as f:
             while True:
                 context = f.readline().rstrip()
                 if context:
-                    text_left, _, text_right = [s.strip() for s in context.partition("$T$")]
                     aspect = f.readline().rstrip()
                     polarity = f.readline().rstrip()
 
-                    # indices = build_indices(self.tokenizer, context, aspect, polarity, add_eos=self.combine)
-                    # text_indices = indices['text_indices']
-                    # left_indices, aspect_indices, right_indices = indices['left_indices'], indices['aspect_indices'], \
-                    #                                               indices['right_indices']
-                    # aspect_boundary = indices['aspect_boundary']
-                    # position_indices = indices['position_indices']
-                    # polarity = indices['polarity']
-                    # context_indices = indices['context_indices']
-                    # context_len = indices['context_len']
-                    # pos_indices = indices['pos_indices']
-                    # polar_indices = indices['polar_indices']
-
-                    context = text_left + " " + aspect + " " + text_right
-                    add_eos = combine  # 当需要组合的时候，末尾添加eos_token
-                    pad_idx = self.tokenizer.word2idx[PAD_TOKEN]
-
-                    # text to indices with same length(max_lemn),numpy ndarray
-                    text_indices = tokenizer.text_to_sequence(text_left + " " + aspect + " " + text_right,
-                                                              add_eos=add_eos)
-                    context_indices = tokenizer.text_to_sequence(context, add_eos=add_eos)
-                    context_len = np.sum(context_indices != pad_idx)
-                    left_indices = tokenizer.text_to_sequence(text_left)
-                    right_indices = tokenizer.text_to_sequence(text_right)
-                    aspect_indices = tokenizer.text_to_sequence(aspect)
-
-                    aspect_len = len(tokenizer.tokenize(aspect))
-                    left_len = len(tokenizer.tokenize(text_left))
-                    aspect_boundary = np.asarray([left_len, left_len + aspect_len - 1], dtype=np.int64)
-                    polarity = int(polarity) + 1 if polarity != '' else -1  # neg:0 neu:1 pos:2 null:-1(unlabeled)
-                    pos_indices, polar_indices = tokenizer.text_to_pos_polar(context)  # part of speech/polar
-                    position_indices = tokenizer.text_to_position(context_len, aspect_boundary)
+                    indices = build_indices(self.tokenizer, context, aspect, polarity,partition_token=ASPECT_REPLACE_TOKEN)
+                    text_indices = indices['text_indices']
+                    left_indices, aspect_indices, right_indices = indices['left_indices'], indices['aspect_indices'], \
+                                                                  indices['right_indices']
+                    context = indices['context']
+                    aspect_boundary = indices['aspect_boundary']
+                    position_indices = indices['position_indices']
+                    polarity = indices['polarity']
+                    context_indices = indices['context_indices']
+                    context_len = indices['context_len']
+                    pos_indices = indices['pos_indices']
+                    polar_indices = indices['polar_indices']
 
                     if all_data.get(context):
-                        # context aspect
+                        # add info
                         all_data[context]['text_indices'].append(text_indices)
                         all_data[context]['left_aspect_right_indices'].append(
                             (left_indices, aspect_indices, right_indices))
@@ -464,7 +438,7 @@ class ABSADataset(Dataset):
                         all_data[context]['position_indices'].append(position_indices)
                         all_data[context]['polarity'].append(polarity)
                     else:
-                        # 一句话里可能有多个属性
+                        # multi aspects exist in one sentence,use List to store some attributes
                         all_data[context] = {
                             'text_indices': [text_indices],
                             'context_indices': context_indices,
@@ -478,15 +452,12 @@ class ABSADataset(Dataset):
                             'polarity': [polarity],
                         }
 
-
                 else:
                     break
         self.all_data = all_data
 
     def build_dataset(self):
         all_data = self.all_data
-        combine = self.combine
-        max_seq_len = self.tokenizer.max_seq_len
         pad_token_idx = self.tokenizer.word2idx[PAD_TOKEN]
         for context, val in all_data.items():
             # meta struct
@@ -499,38 +470,19 @@ class ABSADataset(Dataset):
                 'aspect_boundary': 0,
                 'target': 0,
                 'len_s': val['context_len'],
-                'len_t': 0,
                 'mask_s': val['context_indices'] != pad_token_idx,  # mask for src
-                'mask_t': 0  # mask for target
             }
-            if combine:
+
+            # 1 context 1 aspect ,iterate aspects in one sentence
+            for i in range(len(val['polarity'])):
                 data_item = data_meta.copy()
-                target = []  # (as,ae,p),..eos_position
-                for i in range(len(val['polarity'])):
-                    target.append(val['aspect_boundary'][i][0])  # as
-                    target.append(val['aspect_boundary'][i][1])  # ae
-                    target.append(val['polarity'][i])  # p
-                target.append(val['context_len'] - 1)  # eos position in context
-
-                data_item['len_t'] = len(target)
-
-                mask_t = np.zeros(max_seq_len, dtype=np.bool)
-                mask_t[:len(target)] = True
-                data_item['mask_t'] = mask_t
-                data_item['target'] = pad_and_truncate(target, max_seq_len)
-
+                data_item['target'] = val['polarity'][i]
+                data_item['polarity'] = val['polarity'][i]
+                data_item['text_indices'] = val['text_indices'][i]
+                data_item['position_indices'] = val['position_indices'][i]
+                data_item['aspect_indices'] = val['aspect_indices'][i]
+                data_item['aspect_boundary'] = val['aspect_boundary'][i]
                 self.data.append(data_item)
-            else:
-                # 1 context 1 aspect
-                for i in range(len(val['polarity'])):
-                    data_item = data_meta.copy()
-                    data_item['target'] = val['polarity'][i]
-                    data_item['polarity'] = val['polarity'][i]
-                    data_item['text_indices'] = val['text_indices'][i]
-                    data_item['position_indices'] = val['position_indices'][i]
-                    data_item['aspect_indices'] = val['aspect_indices'][i]
-                    data_item['aspect_boundary'] = val['aspect_boundary'][i]
-                    self.data.append(data_item)
 
     def load_dataset(self):
         print('loading dataset:[{}]'.format(self.dat_fname))
@@ -673,97 +625,6 @@ class MixDataLoader:
                 yield next(labeled_loader), 'labeled'
                 if self.semi_supervised:
                     yield u_batch, 'unlabeled'
-
-
-class DataAug:
-    def __init__(self, fnames, tokenizer, embed_matrix):
-        self.fnames = fnames
-        self.tokenizer = tokenizer
-        self.embed = torch.tensor(embed_matrix, device=DEVICE)
-        self.window = 3
-        self.datas = []
-
-    def augmentation(self):
-        for fname in self.fnames:
-            print('aug {}……'.format(fname))
-            datas = []
-            with open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore') as f:
-                while True:
-                    context = f.readline().rstrip()
-                    if not context: break
-                    text_left, _, text_right = [s.strip() for s in context.partition("$T$")]
-                    aspect = f.readline().rstrip()
-                    polarity = f.readline().rstrip()
-
-                    context = text_left + " " + aspect + " " + text_right
-                    len_left = len(self.tokenizer.tokenize(text_left))
-                    len_aspect = len(self.tokenizer.tokenize(aspect))
-                    len_context = len(self.tokenizer.tokenize(context))
-                    position_l = max(0, len_left - self.window)
-                    position_r = min(len_left + len_aspect + self.window, len_context - 1)
-
-                    positions = list(range(0, position_l)) + list(range(position_r, len_context))
-                    new_sentences = self._augmentation(context, positions)
-                    for s in new_sentences:
-                        datas.append((s, aspect.lower(), polarity))
-
-            self.write_file(datas, fname)
-
-    def _augmentation(self, sentence, positions):
-        edas = [self.replace, self.delete, self.add, self.swap]
-        tokens = self.tokenizer.tokenize(sentence)
-        new_sentences = []
-        for eda in edas:
-            position = random.choice(positions)
-            new_sentence = eda(tokens[:], position)  # copy
-            # print(new_sentence)
-            new_sentences.append(new_sentence)
-
-        return new_sentences
-
-    def write_file(self, datas, fname):
-        # datas[(sentence,aspect,polarity)]
-        fname = os.path.basename(fname)
-        fname = os.path.join('state', 'eda_%s' % fname)
-        print('write {} sentences:{}'.format(fname, len(datas)))
-        with open(fname, 'w', encoding='utf8') as f:
-            for sentence, aspect, polarity in datas:
-                sentence = sentence.partition(aspect)
-                sentence = sentence[0] + "$T$" + sentence[2]
-
-                f.write(sentence + '\n')
-                f.write(aspect + '\n')
-                f.write(str(polarity) + '\n')
-
-    def replace(self, tokens, p):
-        token = tokens[p]
-        new_tokens, _ = get_similar_tokens(token, embed_matrix=self.embed, tokenizer=self.tokenizer)
-        new_token = new_tokens[random.randint(0, len(new_tokens) - 1)]
-        tokens[p] = new_token
-        # print('REPLACE [{}] with [{}]'.format(tokens[p], new_token))
-        return ' '.join(tokens)
-
-    def add(self, tokens, position):
-        num_words = len(self.tokenizer.word2idx)
-        new_token = random.randint(len(SPECIAL_TOKENS), num_words - 1)
-        new_token = self.tokenizer.idx2word[new_token]
-        tokens.insert(position, new_token)
-        # print('ADD [{}] in [{}]'.format(new_token, position))
-        return ' '.join(tokens)
-
-    def swap(self, tokens, position):
-        length = len(tokens)
-        if length > 2:
-            position1 = position + 1 if position + 1 < length else position - 1
-            # print('SWAP [{}], [{}]'.format(tokens[position], tokens[position1]))
-            tokens[position], tokens[position1] = tokens[position1], tokens[position]
-        return ' '.join(tokens)
-
-    def delete(self, tokens, position):
-        # print('DELETE [{}] at [{}]'.format(tokens[position], position))
-        tokens.pop(position)
-        return ' '.join(tokens)
-
 
 if __name__ == '__main__':
     # if the tokenizer rebuild ,the embedding matrix should rebuilf too

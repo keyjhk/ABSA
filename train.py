@@ -231,7 +231,7 @@ class Instructor:
 
     def predict(self, name,sample=None):
         # sample : context,aspect,polarity
-        from data_utils import build_indices
+        from data_utils import build_indices,ASPECT_REPLACE_TOKEN
         self.load(name)
         model = self.model
         model.eval()
@@ -275,7 +275,7 @@ class Instructor:
                         f.write('\n' * 3)
 
             else:
-                indices = build_indices(tokenizer,*sample)
+                indices = build_indices(tokenizer,*sample,partition_token=sample[1])
                 for key in indices.keys():
                     val = indices[key]
                     if isinstance(val,numpy.ndarray) and val.size>1:
