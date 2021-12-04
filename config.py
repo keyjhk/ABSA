@@ -17,7 +17,7 @@ PARAMETERS = {
     # train
     'device': 'cuda' if torch.cuda.is_available() else 'cpu',
     'gpu_parallel': False,
-    'device_ids': [0, 6, 5, 7],
+    'device_ids': [6, 5, 7, 0],
     'print_every': 1,
     'step_every': 0.5,  # 0<x<1 ,show progress when achieved
     'patience': 10,  # early stop
@@ -26,7 +26,8 @@ PARAMETERS = {
     'clear_model': True,  # clear saved models before run ,retrain ,prevent load
     'max_seq_len': 85,
     'valid_ratio': 0,
-    'unlabel_len': None,
+    'train_len': None,
+    'unlabel_len': 2e4,
     'dataset': 'laptop',
     "save_model_name": '{dataset}_{time}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl',
     # eval
@@ -46,12 +47,12 @@ PARAMETERS = {
     "encoder_hidden_size": 300,  # 300
     # dynamic mask/weight
     'drop_attention': 0,
-    'window_weight': 2,
-    "window_mask": 3,  # 3 lap,4 res
+    'window_weight': 0,
+    "window_mask": 3,
     'mask_ratio': 1,
     # cvt
-    'drop_lab': 0.4,
-    'drop_unlab': 0.7,
+    'drop_lab': 0.1,
+    'drop_unlab': 0.4,  # 6 for lap,4 for res
     'unlabeled_loss': 'mask_strong',  # mask_window  # mask_strong ,all,  weight
 
 }
@@ -59,3 +60,46 @@ PARAMETERS = {
 # not show in log
 EXCLUDE = ['datasets', 'print_every', 'step_every', 'clear_model', 'initializers',
            'patience', 'semi_patience', 'max_seq_len', 'save_model_name']
+
+
+class Option:
+    def __init__(self, options, name='default'):
+        self.option = options
+        self.name = name
+        self._exclude_iter = EXCLUDE
+
+    def set(self, new_options, name=''):
+        if not isinstance(new_options, dict):
+            raise Exception('options should be a dict')
+        _option = self.option.copy()
+
+        for key, val in new_options.items():
+            _option[key] = val
+        name = name if name else self.name
+
+        return Option(_option, name)
+
+    def __iter__(self):
+        keys = self.option.keys()
+        for key in keys:
+            if key in self._exclude_iter: continue
+            yield '[ {} ]:{}'.format(key, self.option[key])
+
+    def __len__(self):
+        return len(self.option)
+
+    def __add__(self, other):
+        assert isinstance(other, Option)
+        _opt = self.option.copy()
+        _opt.update(other.option)
+        return Option(_opt, name=self.name + '_' + other.name)
+
+    def __getattr__(self, item):
+        try:
+            return self.option[item]
+        except Exception as e:
+            print('key:{} not found'.format(item))
+            raise e
+
+
+DEFAULT_OPTION = Option(PARAMETERS)

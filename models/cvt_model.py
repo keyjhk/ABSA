@@ -182,6 +182,7 @@ class CVTModel(nn.Module):
 
         return aspect_pool
 
+
     def _freeze_model(self):
         # freeze primary only; encoder is unfreezed
         self.primary.eval()

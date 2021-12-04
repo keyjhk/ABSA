@@ -328,6 +328,39 @@ class Tokenizer(object):
         return ' '.join(str(idx2char[idx]) for idx in sequence if idx != skip_word)
 
 
+def build_indices(tokenizer, context, aspect, polarity, add_eos=False):
+    # context : str, .... '$' .....
+    # aspect  : str,one or more words ;   polarity :str,number
+    # add_eos :add eos token if True
+    text_left, _, text_right = [s.strip() for s in context.partition(aspect)]
+    context = text_left + " " + aspect + " " + text_right
+
+    # text(no aspect),context(text with aspect)
+    pad_idx = tokenizer.word2idx[PAD_TOKEN]
+
+    text_indices = tokenizer.text_to_sequence(text_left + " " + aspect + " " + text_right,
+                                              add_eos=add_eos)
+    context_indices = tokenizer.text_to_sequence(context, add_eos=add_eos)
+    context_len = np.sum(context_indices != pad_idx)
+    left_indices = tokenizer.text_to_sequence(text_left)
+    right_indices = tokenizer.text_to_sequence(text_right)
+    aspect_indices = tokenizer.text_to_sequence(aspect)
+
+    aspect_len = len(tokenizer.tokenize(aspect))
+    left_len = len(tokenizer.tokenize(text_left))
+    aspect_boundary = np.asarray([left_len, left_len + aspect_len - 1], dtype=np.int64)
+    polarity = int(polarity) + 1 if polarity != '' else -1  # neg:0 neu:1 pos:2 null:-1(unlabeled)
+    pos_indices, polar_indices = tokenizer.text_to_pos_polar(context)  # part of speech/polar
+    position_indices = tokenizer.text_to_position(context_len, aspect_boundary)
+
+    return {'text_indices': text_indices, 'context_indices': context_indices,
+            'len_s':context_len,
+            'left_indices': left_indices, 'right_indices': right_indices,
+            'aspect_indices': aspect_indices, 'aspect_boundary': aspect_boundary,
+            'polarity': polarity, 'context_len': context_len,
+            'pos_indices': pos_indices, 'polar_indices': polar_indices, 'position_indices': position_indices}
+
+
 class ABSADataset(Dataset):
     def __init__(self, fname, tokenizer, write_file=False, combine=False):
         # data
@@ -389,9 +422,19 @@ class ABSADataset(Dataset):
                     aspect = f.readline().rstrip()
                     polarity = f.readline().rstrip()
 
-                    context = text_left + " " + aspect + " " + text_right
+                    # indices = build_indices(self.tokenizer, context, aspect, polarity, add_eos=self.combine)
+                    # text_indices = indices['text_indices']
+                    # left_indices, aspect_indices, right_indices = indices['left_indices'], indices['aspect_indices'], \
+                    #                                               indices['right_indices']
+                    # aspect_boundary = indices['aspect_boundary']
+                    # position_indices = indices['position_indices']
+                    # polarity = indices['polarity']
+                    # context_indices = indices['context_indices']
+                    # context_len = indices['context_len']
+                    # pos_indices = indices['pos_indices']
+                    # polar_indices = indices['polar_indices']
 
-                    # text(no aspect),context(text with aspect)
+                    context = text_left + " " + aspect + " " + text_right
                     add_eos = combine  # 当需要组合的时候，末尾添加eos_token
                     pad_idx = self.tokenizer.word2idx[PAD_TOKEN]
 
@@ -736,11 +779,11 @@ if __name__ == '__main__':
     # labeled
     ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
     ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
-    ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
-    ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
-    # unlabeled
-    ABSADataset(fname='data/unlabeled/formated_electronic.txt', tokenizer=tokenizer)
-    ABSADataset(fname='data/unlabeled/formated_yelp_review.txt', tokenizer=tokenizer)
-    # eda
+    # ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
+    # ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
+    # # unlabeled
+    # ABSADataset(fname='data/unlabeled/formated_electronic.txt', tokenizer=tokenizer)
+    # ABSADataset(fname='data/unlabeled/formated_yelp_review.txt', tokenizer=tokenizer)
+    # # eda
     # eda_lap=ABSADataset(fname='data/eda/eda_Laptops_Train.xml.seg', tokenizer=tokenizer)
     # eda_res=ABSADataset(fname='data/eda/eda_Restaurants_Train.xml.seg', tokenizer=tokenizer)

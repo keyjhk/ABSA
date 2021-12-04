@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 from data_utils import *
 from models.cvt_model import CVTModel
-from config import PARAMETERS, EXCLUDE
+from config import DEFAULT_OPTION
 
 import warnings
 
@@ -30,47 +30,6 @@ def time_cal(func):
 
     return inner
 
-
-class Option:
-    def __init__(self, options, name='default'):
-        self.option = options
-        self.name = name
-        self._exclude_iter = EXCLUDE
-
-    def set(self, new_options, name=''):
-        if not isinstance(new_options, dict):
-            raise Exception('options should be a dict')
-        _option = self.option.copy()
-
-        for key, val in new_options.items():
-            _option[key] = val
-        name = name if name else self.name
-
-        return Option(_option, name)
-
-    def __iter__(self):
-        keys = self.option.keys()
-        for key in keys:
-            if key in self._exclude_iter: continue
-            yield '[ {} ]:{}'.format(key, self.option[key])
-
-    def __len__(self):
-        return len(self.option)
-
-    def __add__(self, other):
-        assert isinstance(other, Option)
-        _opt = self.option.copy()
-        _opt.update(other.option)
-        return Option(_opt, name=self.name + '_' + other.name)
-
-    def __getattr__(self, item):
-        try:
-            return self.option[item]
-        except Exception as e:
-            print('key:{} not found'.format(item))
-            raise e
-
-
 class Instructor:
     def __init__(self, opt, logout=True):
         # set seed
@@ -84,7 +43,6 @@ class Instructor:
         self.batch_size = opt.batch_size
         self.max_seq_len = opt.max_seq_len
         self.semi_supervised = opt.semi_supervised
-        self.clear_model = opt.clear_model
 
         # train parameters
         self.start_epoch = 0
@@ -94,8 +52,6 @@ class Instructor:
 
         self.dataset_files = opt.datasets
         self.datasetname = opt.dataset
-        self.valid_ratio = opt.valid_ratio
-        self.unlabel_len = opt.unlabel_len
         self.trainset, self.validset, self.testset, self.unlabeledset = None, None, None, None
 
         self.trainloader, self.validloader, self.testloader = None, None, None
@@ -150,7 +106,7 @@ class Instructor:
 
     def init_dataset(self):
         max_seq_len = self.max_seq_len
-        valid_ratio = self.valid_ratio
+        valid_ratio = self.opt.valid_ratio
         batch_size = self.batch_size
 
         tokenizer = build_tokenizer(max_seq_len=max_seq_len)
@@ -163,15 +119,23 @@ class Instructor:
         trainset = ABSADataset(fname=train_fname, tokenizer=tokenizer)
         testset = ABSADataset(fname=test_fname, tokenizer=tokenizer)
         unlabelset = ABSADataset(fname=unlabel_fname, tokenizer=tokenizer)
-        if self.unlabel_len is not None:
-            unlabel_len = min(self.unlabel_len, len(unlabelset))
-            _, unlabelset = random_split(unlabelset, [len(unlabelset) - unlabel_len, unlabel_len])
 
-        if valid_ratio > 0:  # split trainset
+        # split dataset
+        # unlabel
+        if self.opt.unlabel_len is not None:
+            unlabel_len = int(min(self.opt.unlabel_len, len(unlabelset)))
+            _, unlabelset = random_split(unlabelset, [len(unlabelset) - unlabel_len, unlabel_len])
+        # train
+        if self.opt.train_len is not None:
+            train_len = int(min(self.opt.train_len, len(trainset)))
+            _, trainset = random_split(trainset, [len(trainset) - train_len, train_len])
+        # valid
+        if valid_ratio > 0:
             valset_len = int(len(trainset) * valid_ratio)
             trainset, validset = random_split(trainset, [len(trainset) - valset_len, valset_len])
+        else:
+            validset = testset
 
-        validset = testset  # always set the  testset as validset
         # dataset
         self.trainset = trainset
         self.validset = validset
@@ -209,7 +173,7 @@ class Instructor:
             'xavier_normal_': torch.nn.init.xavier_normal_,
             'orthogonal_': torch.nn.init.orthogonal_,
         }
-        initailizer = initializers[opt.initializer]
+        initailizer = initializers[self.opt.initializer]
         # print('reset params:'.center(30, '='))
         for name, p in self.model.named_parameters():
             if 'word_embedding' in name:
@@ -265,6 +229,65 @@ class Instructor:
         loss = round(loss, 4)
         return acc, f1, loss
 
+    def predict(self, name,sample=None):
+        # sample : context,aspect,polarity
+        from data_utils import build_indices
+        self.load(name)
+        model = self.model
+        model.eval()
+        tokenizer = self.tokenizer
+        predict_results = {'true': [], 'false': []}
+        n_correct, n_total = 0, 0
+
+        saved_name = '{}_semi_{}_predict_results'.format(self.datasetname, self.semi_supervised)
+
+        with torch.no_grad():
+            if not os.path.exists('state/' + saved_name + '.pkl'):
+                # create predict results and stored then :
+                self.logger.info('create predict results……')
+                dataloader = self.testloader
+                for batch in dataloader:
+                    inputs = [batch[col].to(self.device) for col in self.inputs_cols]
+                    _loss, out, target = model(*inputs)  # out:batch,num_polar ; target: batch
+                    t_targets, t_outputs = target, out.argmax(dim=-1)  # batch
+                    n_correct += (t_targets == t_outputs).sum()
+                    n_total += t_targets.shape[0]
+                    aspects = [tokenizer.sequence_to_text(indice) for indice in
+                                      batch['aspect_indices'].numpy()]
+                    batch_contexts = [tokenizer.sequence_to_text(indice) for indice in
+                                      batch['context_indices'].numpy()]  # batch
+                    for i in range(target.shape[0]):
+                        _c,_a,_t,_o = batch_contexts[i],aspects[i], t_targets[i].item(), t_outputs[i].item()
+                        key = 'true' if t_targets[i] == t_outputs[i] else 'false'
+                        predict_results[key].append((_c,_a,_t,_o))
+
+                print('total:{} correct:{} predict_true:{} predict_false:{}'.format(n_total, n_correct,
+                                                                                    len(predict_results['true']),
+                                                                                    len(predict_results['false'])))
+                pickle.dump(predict_results,open('state/'+saved_name+'.pkl','wb'))
+                with open('state/' + saved_name+'.txt', 'w') as f:
+                    for label, results in predict_results.items():
+                        f.write(label.center(30, '=') + '\n')
+                        for res in results:
+                            text = '\n'.join([str(x) for x in res])  # context ,target,predict
+                            text += '\n' * 2
+                            f.write(text)
+                        f.write('\n' * 3)
+
+            else:
+                indices = build_indices(tokenizer,*sample)
+                for key in indices.keys():
+                    val = indices[key]
+                    if isinstance(val,numpy.ndarray) and val.size>1:
+                        indices[key] = torch.tensor(indices[key]).view(1,-1)
+                    else:
+                        indices[key] = torch.tensor(indices[key]).view(1)
+                inputs = [indices[col].to(self.device) for col in self.inputs_cols]
+                _loss, out, target = model(*inputs)  # out:batch,num_polar ; target: batch
+                out = out.argmax(dim=-1)
+                print('sentence: {}\naspect: {}\npredict:{} target:{}'.format(sample[0],sample[1],out.item(),target.item()))
+
+
     def save(self, model, epoch, acc, f1):
         save_model_name = self.save_model_name
         states = {
@@ -274,7 +297,7 @@ class Instructor:
             'acc': acc,
             'f1': f1,
         }
-        fname = save_model_name.format(time=self.run_time,dataset=self.datasetname,
+        fname = save_model_name.format(time=self.run_time, dataset=self.datasetname,
                                        model=self.model_name, epoch=epoch,
                                        acc=acc, f1=f1
                                        )
@@ -285,32 +308,37 @@ class Instructor:
     def get_model_cpt(self):
         # {dataset}_{time}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl
         # model_pattern = r'{}_{}_epoch.+'.format(self.datasetname, self.model_name)
-        model_pattern = r'{}_{}_{}_epoch.+'.format(self.datasetname,self.run_time, self.model_name)
+        model_pattern = r'{}_{}_{}_epoch.+'.format(self.datasetname, self.run_time, self.model_name)
         return list(filter(lambda x: re.match(model_pattern, x),
                            os.listdir('state')))
 
-    def load(self):
-        # '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl'
-        model_cpt = self.get_model_cpt()
-        # sorted by acc
-        model_cpt.sort(key=lambda x: float(re.match(r'.+acc_(.+?)_.+', x).group(1)))
+    def load(self, name=None):
+        if name is None:
+            # '{dataset}_{model}_epoch{epoch}_acc_{acc:.2f}_f1_{f1:.2f}.pkl'
+            model_cpt = self.get_model_cpt()
+            # sorted by acc
+            model_cpt.sort(key=lambda x: float(re.match(r'.+acc_(.+?)_.+', x).group(1)))
+            if len(model_cpt) > 0:
+                best_model_name = model_cpt[-1] if len(model_cpt) > 0 else model_cpt
+            else:
+                return
+        else:
+            best_model_name = name
 
-        if len(model_cpt) > 0:
-            best_model_name = model_cpt[-1]
-            self.logger.info('load best_model_name:{}'.format(best_model_name))
-            model_cpt = torch.load(open('state/' + best_model_name, 'rb'))
-            # max
-            self.start_epoch = model_cpt['epoch']
-            self.max_val_f1 = model_cpt['f1']
-            self.max_val_acc = model_cpt['acc']
-            # model/opt
-            self.model.load_state_dict(model_cpt['model'])
+        self.logger.info('load best_model_name:{}'.format(best_model_name))
+        model_cpt = torch.load(open('state/' + best_model_name, 'rb'))
+        # max
+        self.start_epoch = model_cpt['epoch']
+        self.max_val_f1 = model_cpt['f1']
+        self.max_val_acc = model_cpt['acc']
+        # model/opt
+        self.model.load_state_dict(model_cpt['model'])
 
-            self.optimizer.load_state_dict(model_cpt['optimizer'])
+        self.optimizer.load_state_dict(model_cpt['optimizer'])
 
     def clear(self):
         self.logger.info('remove saved models'.center(30, '='))
-        if not self.clear_model: return
+        if not self.opt.clear_model: return
         model_cpt = self.get_model_cpt()
         model_cpt = [os.path.join('state', x) for x in model_cpt]
         if model_cpt:
@@ -360,7 +388,7 @@ class Instructor:
             if mode == 'labeled':
                 step += 1
             self.model.train()
-            self.optimizer.zero_grad()  # set_to_none=True
+            self.optimizer.zero_grad(set_to_none=True)  # set_to_none=True
             inputs = [batch[col].to(self.device) for col in self.inputs_cols]
             loss, out, target = self.model(*inputs, mode=mode)
             loss.backward()
@@ -425,61 +453,48 @@ def set_logger(name=None, file=None, level=logging.INFO):
     return logger
 
 
-def plot(x, y, xlabel='', ylabel='', title=''):
-    # x :[]  y
-
-    plt.xlabel(xlabel)
-    plt.xlabel(ylabel)
-    title = title if title else '{}-{}-'.format(ylabel, xlabel)
-    title += strftime("%m%d-%H%M%S", localtime())
-    plt.title(title)
-    plt.plot(x, y, marker='o')
-
-    # annotate
-    for px, py in zip(x, y):
-        plt.annotate(text=str(py), xy=(px, py), xytext=(px, py + 0.1))
-
-    plt.savefig('state/figures/{}.png'.format(title))
-    plt.show()
-
-
 def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False):
     # par_vals:{parameter_name:[val1,],...}
     def is_valid_option(opt):
         is_valid_opt = True
         logger.info('comparing……'.center(30, '='))
 
-        valid_ratios = [0.25, 0.5, 0.75, 0]
+        # valid_ratios = [0, 0.25, 0.5, 0.75]
+        ratio_name = 'train_len'
+        ratios = [None, 1500, 1000, 500]
         # only these factors influence supervised
         valid_opt_name = '{lr}_{l2}_{window_weight}_{drop_lab}'.format(lr=opt.lr, l2=opt.l2,
                                                                        window_weight=opt.window_weight,
                                                                        drop_lab=opt.drop_lab)
-        if not semi_valid_ratio_scores.get(valid_opt_name):
-            semi_valid_ratio_scores[valid_opt_name] = {x: None for x in valid_ratios}
+        # {valid_opt_name:{ratio:acc,...}}
+        if not semi_valid_ratio_scores.get(valid_opt_name):  # init
+            semi_valid_ratio_scores[valid_opt_name] = {x: None for x in ratios}
         semi_scores = semi_valid_ratio_scores.get(valid_opt_name)  # {ratio:acc}
 
-        for valid_ratio in valid_ratios:
+        for ratio in ratios:
             # the difference between sup/sems is only the toggle of semi_supervised
             # keep other settings same:drop_lab/drop_unlab/mask_ratio
             # sup
-            opt = opt.set({'valid_ratio': valid_ratio})
+            _opt = opt.set({ratio_name: ratio}, name='compare_' + opt.name)
 
-            if not semi_scores.get(valid_ratio):
-                _ins_sup = Instructor(opt.set({'semi_supervised': False}), logout=False)
+            if not semi_scores.get(ratio):
+                _ins_sup = Instructor(_opt.set({'semi_supervised': False}), logout=False)
                 res_sup = _ins_sup.run()
-                semi_scores[valid_ratio] = res_sup
+                semi_scores[ratio] = res_sup
             else:
-                res_sup = semi_scores.get(valid_ratio)
+                res_sup = semi_scores.get(ratio)  # fetch sup results directly
 
             # semi
-            _ins_semi = Instructor(opt.set({'semi_supervised': True}), logout=False)
+            _ins_semi = Instructor(_opt.set({'semi_supervised': True}), logout=False)
             res_semi = _ins_semi.run()
-
             logger.info(
-                'valid_ratio: {} semi_acc:{} super_acc :{}'.format(valid_ratio, res_semi['acc'], res_sup['acc'], ))
-            if res_semi['acc'] < res_sup['acc']:
+                'ratio: {} semi[ acc:{} f1:{} ] super_acc[ acc:{} f1:{} ]'.format(ratio, res_semi['acc'],
+                                                                                  res_semi['f1'],
+                                                                                  res_sup['acc'], res_sup['f1']))
+
+            is_valid_opt = res_semi['acc'] > res_sup['acc']
+            if not is_valid_opt:
                 logger.info('option:{} is dropped!'.format(opt.name).center(30, '='))
-                is_valid_opt = False
                 break
         else:
             logger.info('option:{} is valid!'.format(opt.name).center(30, '='))
@@ -530,15 +545,14 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
     for dataset in datasets:
         results = []
         for search_option in search_options:
+            if semi_sup_compare and not is_valid_option(search_option.set({'dataset': dataset})):
+                continue
             _ins = Instructor(search_option.set({'dataset': dataset}))
             res = _ins.run()
             results.append(res)
             vr = '[dataset]:{dataset} [{option}] [result]:{result}'.format(dataset=dataset,
                                                                            option=search_option.name,
                                                                            result=res)
-            if semi_sup_compare and not is_valid_option(search_option.set({'dataset': dataset})):
-                continue
-
             search_results[dataset].append(vr)
             logger.info(vr)
             acc = res['acc']
@@ -556,47 +570,11 @@ def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False
     logger.info('best params：{}'.format(best_params))
 
 
-def main(opt):
+def main():
+    opt = DEFAULT_OPTION
     instrutor = Instructor(opt)
     instrutor.run()
 
 
 if __name__ == '__main__':
-    opt = Option(PARAMETERS)
-    # supervised
-    opt_res = opt.set({'dataset': 'restaurant'}, name='res')  # default supervised
-    opt_lap = opt.set({'dataset': 'laptop'}, name='lap')
-    # semi_supervised
-    opt_semi_res = opt.set({'dataset': 'restaurant', 'semi_supervised': True}, name='semi_res')
-    opt_semi_lap = opt.set({'dataset': 'laptop', 'semi_supervised': True}, name='semi_lap')
-
-    # p
-    ps = {
-        # 'batch_size': [32, 64],
-        # 'lr': [1e-2, 1e-3, 1e-4],
-        # 'l2': [5e-3, 1e-3, 5e-4,1e-4,5e-5,1e-5],
-        # 'encoder_hidden_size':[1024]
-        # 'window_weight': range(0, 10,2),
-        # 'window_mask': range(2, 9),
-        # 'mask_ratio': [x / 10 for x in range(3, 8)],
-        'drop_unlab': [x / 10 for x in range(3, 8)],
-        # 'drop_attention': [x / 10 for x in range(2, 10, 1)],
-        # 'unlabeled_loss': ['mask_weak','mask_strong','all'],
-        # 'valid_ratio': [x / 100 for x in range(0, 75, 25)],
-        # 'unlabel_len': [500, 1000, 5000, 10000, 20000],
-        # 'semi_supervised': [True, False],
-        # 'gpu_parallel':[True,False],
-        # 'use_weight': [False, True]
-    }
-
-    datasets = opt.datasets.keys()
-    # parameter_explore(opt, ps)  # super default lap
-    # parameter_explore(opt, ps , datasets=datasets)  # super all
-    # parameter_explore(opt, ps, datasets=['restaurant'])  # restaurant
-
-    # parameter_explore(opt.set({"semi_supervised": True}), ps,
-    #                   semi_sup_compare=True,
-    #                   datasets=['laptop'])  # semi default laptop restaurant
-    parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
-    # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default res
-    # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all#
+    main()
