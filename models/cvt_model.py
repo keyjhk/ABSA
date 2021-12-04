@@ -20,8 +20,7 @@ class CVTModel(nn.Module):
         super().__init__()
 
         self.inputs_cols = [
-            'context_indices', 'pos_indices', 'polar_indices',
-            'text_indices', 'position_indices',
+            'context_indices',  'position_indices',
             'aspect_indices', 'aspect_boundary',
             'polarity',
             'len_s',
@@ -41,12 +40,7 @@ class CVTModel(nn.Module):
 
         # encoder
         self.encoder_hidden_size = opt.encoder_hidden_size
-        self.encoder = PositionEncoder(word_embed_dim=opt.word_embedding_size,
-                                       position_embed_dim=opt.position_embedding_size,
-                                       hidden_size=opt.encoder_hidden_size,
-                                       drop_lab=opt.drop_lab,
-                                       drop_unlab=opt.drop_unlab,
-                                       )
+        self.encoder = PositionEncoder(opt)
 
         # primary
         self.primary = PolarDecoder(word_embedding=self.word_embedding,
@@ -68,9 +62,6 @@ class CVTModel(nn.Module):
 
         # meta data
         context = inputs[self.inputs_cols.index('context_indices')]  # batch,MAX_LEN
-        pos = inputs[self.inputs_cols.index('pos_indices')]  # batch,MAX_LEN
-        polar = inputs[self.inputs_cols.index('polar_indices')]  # batch,MAX_LEN
-        text_indices = inputs[self.inputs_cols.index('text_indices')]  # batch,MAX_LEN
         position_indices = inputs[self.inputs_cols.index('position_indices')]  # batch,MAX_LEN
         aspect_indices = inputs[self.inputs_cols.index('aspect_indices')]  # batch,MAX_LEN
         aspect_boundary = inputs[self.inputs_cols.index('aspect_boundary')]  # batch,2
@@ -79,17 +70,12 @@ class CVTModel(nn.Module):
 
         # word/polar/pos/position # batch,MAX_LEN,word_embed_dim
         word = self.word_embedding(context)  # batch,MAX_LEN,word_embed_dim
-        pos = self.pos_embedding(pos)  # batch,MAX_LEN,pos_embed_dim
-        polar = self.polar_embedding(polar)  # batch,MAX_LEN,polar_embed_dim
         position = self.position_embedding(position_indices)  # batch,MAX_LEN,position_embed_dim
         # squeeze
         word = squeeze_embedding(word, len_x)
-        pos = squeeze_embedding(pos, len_x)
-        polar = squeeze_embedding(polar, len_x)
         position = squeeze_embedding(position, len_x)
 
         # pool(average) aspect
-        max_x = len_x.max()
         aspect_pool = self.pool_aspect(aspect_indices, aspect_boundary)  # batch,1,embed_dim
 
         # uni_out
@@ -102,9 +88,7 @@ class CVTModel(nn.Module):
 
         if mode == "labeled":  # 监督训练
             self._unfreeze_model()
-            # docoder primary
             out = self.primary(uni_weight, uni_hidden)
-            # out = self.primary(uni_primary, uni_hidden)
             loss = self.loss(out, polarity)
             return loss, out, polarity
         elif mode == "unlabeled":  # 无监督训练
@@ -115,18 +99,8 @@ class CVTModel(nn.Module):
             out_mw = self.wo_weight(uni_primary, uni_hidden)  # batch,num_polar ,not weighted
 
             loss_mw = F.kl_div(out_mw.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
-            loss_ms = F.kl_div(out_ms.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
 
-            # mask window
-
-            if self.unlabeled_loss == 'mask_strong':
-                # loss = loss_ms
-                loss = loss_mw
-            elif self.unlabeled_loss == 'all':
-                loss = loss_ms + loss_mw
-
-            else:
-                raise Exception('invalid unlabeled loss')
+            loss= loss_mw
 
             return loss, label_primary, polarity
 

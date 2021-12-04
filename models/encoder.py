@@ -164,22 +164,15 @@ class RAMDecoder(nn.Module):
 
 class PositionEncoder(nn.Module):
 
-    def __init__(self,
-                 word_embed_dim,
-                 position_embed_dim,
-                 hidden_size,
-                 drop_lab,
-                 drop_unlab
-                 ):
+    def __init__(self,opt):
         super().__init__()
         self.name = 'PositionEncoder'
         # atrribute
-        self.word_embed_dim = word_embed_dim
-        self.hidden_size = hidden_size
-        self.uni_gru = DynamicGRU(word_embed_dim + position_embed_dim, hidden_size,
+        self.uni_gru = DynamicGRU(opt.word_embedding_size + opt.position_embedding_size,
+                                  opt.encoder_hidden_size,
                                   batch_first=True, bidirectional=True)
-        self.uni_dropout_lab = nn.Dropout(p=drop_lab)
-        self.uni_dropout_unlab = nn.Dropout(p=drop_unlab)
+        self.uni_dropout_lab = nn.Dropout(p=opt.drop_lab)
+        self.uni_dropout_unlab = nn.Dropout(p=opt.drop_unlab)
 
     def forward(self, word, position, len_x, mode):
         # word/pos/polar: batch,MAX_LEN,embedding_size  ;len_x:batch
