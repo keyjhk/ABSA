@@ -16,14 +16,13 @@ PARAMETERS = {
     },
     # train
     'device': 'cuda' if torch.cuda.is_available() else 'cpu',
-    'gpu_parallel': False,
     'device_ids': [6, 5, 7, 0],
     'print_every': 1,
     'step_every': 0.5,  # 0<x<1 ,show progress when achieved
     'patience': 10,  # early stop
     'batch_size': 32,
     'semi_supervised': False,
-    'clear_model': True,  # clear saved models before run ,retrain ,prevent load
+    'clear_model': True,  # clear saved models each run
     'max_seq_len': 85,
     'valid_ratio': 0,
     'train_len': None,
@@ -46,14 +45,13 @@ PARAMETERS = {
     "position_embedding_size": 50,
     "encoder_hidden_size": 300,  # 300
     # dynamic mask/weight
-    'drop_attention': 0,
-    'window_weight': 0,
-    "window_mask": 3,
-    'mask_ratio': 1,
+    'window_weight': 2,  # res 0,lap 2
+    "window_mask": None,
+    'mask_ratio': None,
     # cvt
-    'drop_lab': 0.1,
-    'drop_unlab': 0.6,  # 0.6 for lap,0.4 for res
-    'unlabeled_loss': 'mask_strong',  # mask_window  # mask_strong ,all,  weight
+    # res: 0.4 0.5  ; lap: 0.2 0.5
+    'drop_lab': 0.2,
+    'drop_unlab': 0.5,
 
 }
 

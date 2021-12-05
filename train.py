@@ -149,7 +149,8 @@ class Instructor:
         unlabeled_loader = DataLoader(dataset=unlabelset, batch_size=batch_size, shuffle=True)
 
         self.mixloader = MixDataLoader(labeled_loader=self.trainloader,
-                                       unlabeld_loader=unlabeled_loader, semi_supervised=self.semi_supervised)
+                                       unlabeld_loader=unlabeled_loader,
+                                       semi_supervised=self.semi_supervised)
 
     def init_model(self):
         opt = self.opt
@@ -231,7 +232,7 @@ class Instructor:
 
     def predict(self, name,sample=None):
         # sample : context,aspect,polarity
-        from data_utils import build_indices,ASPECT_REPLACE_TOKEN
+        from data_utils import build_indices
         self.load(name)
         model = self.model
         model.eval()
@@ -388,7 +389,7 @@ class Instructor:
             if mode == 'labeled':
                 step += 1
             self.model.train()
-            self.optimizer.zero_grad(set_to_none=True)  # set_to_none=True
+            self.optimizer.zero_grad(set_to_none=True)
             inputs = [batch[col].to(self.device) for col in self.inputs_cols]
             loss, out, target = self.model(*inputs, mode=mode)
             loss.backward()
@@ -416,7 +417,6 @@ class Instructor:
             if step % (print_every * label_steps) == 0:
                 valid_res = self.eval(self.validloader)
                 acc, f1, loss = valid_res['acc'], valid_res['f1'], valid_res['loss']
-                # acc, f1, loss = self._evaluate_acc_f1(self.validloader)
                 info = 'epoch:{} epoch_time:{}s loss:{} acc:{}% f1:{} '.format(epoch,
                                                                                (time() - epoch_time_costs) // epoch,
                                                                                loss, acc, f1)
@@ -452,122 +452,6 @@ def set_logger(name=None, file=None, level=logging.INFO):
     logger.addHandler(logging.StreamHandler())  # console
     return logger
 
-
-def parameter_explore(opt, par_vals, datasets=['laptop'], semi_sup_compare=False):
-    # par_vals:{parameter_name:[val1,],...}
-    def is_valid_option(opt):
-        is_valid_opt = True
-        logger.info('comparing……'.center(30, '='))
-
-        # valid_ratios = [0, 0.25, 0.5, 0.75]
-        ratio_name = 'train_len'
-        ratios = [None, 1500, 1000, 500]
-        # only these factors influence supervised
-        valid_opt_name = '{lr}_{l2}_{window_weight}_{drop_lab}'.format(lr=opt.lr, l2=opt.l2,
-                                                                       window_weight=opt.window_weight,
-                                                                       drop_lab=opt.drop_lab)
-        # {valid_opt_name:{ratio:acc,...}}
-        if not semi_valid_ratio_scores.get(valid_opt_name):  # init
-            semi_valid_ratio_scores[valid_opt_name] = {x: None for x in ratios}
-        semi_scores = semi_valid_ratio_scores.get(valid_opt_name)  # {ratio:acc}
-
-        for ratio in ratios:
-            # the difference between sup/sems is only the toggle of semi_supervised
-            # keep other settings same:drop_lab/drop_unlab/mask_ratio
-            # sup
-            _opt = opt.set({ratio_name: ratio}, name='compare_' + opt.name)
-
-            if not semi_scores.get(ratio):
-                _ins_sup = Instructor(_opt.set({'semi_supervised': False}), logout=False)
-                res_sup = _ins_sup.run()
-                semi_scores[ratio] = res_sup
-            else:
-                res_sup = semi_scores.get(ratio)  # fetch sup results directly
-
-            # semi
-            _ins_semi = Instructor(_opt.set({'semi_supervised': True}), logout=False)
-            res_semi = _ins_semi.run()
-            logger.info(
-                'ratio: {} semi[ acc:{} f1:{} ] super_acc[ acc:{} f1:{} ]'.format(ratio, res_semi['acc'],
-                                                                                  res_semi['f1'],
-                                                                                  res_sup['acc'], res_sup['f1']))
-
-            is_valid_opt = res_semi['acc'] > res_sup['acc']
-            if not is_valid_opt:
-                logger.info('option:{} is dropped!'.format(opt.name).center(30, '='))
-                break
-        else:
-            logger.info('option:{} is valid!'.format(opt.name).center(30, '='))
-        return is_valid_opt
-
-    logger_fname = 'p'
-    for p in par_vals.keys():
-        logger_fname += '_{}{}'.format(p, len(par_vals[p]))  # p_{parameter_name}{search_len}
-    logger = set_logger(name='parameter_explore',
-                        file='{}_{}.log'.format(logger_fname, strftime("%m%d-%H%M", localtime())))
-
-    search_options = []
-    if len(par_vals) == 0:
-        search_options.append(opt)
-    elif len(par_vals) == 1:
-        # {p:[v1,]}
-        for p, values in par_vals.items():
-            for v in values:
-                tmp_opt = opt.set({
-                    p: v,
-                }, 'p_' + '{name}[{value}]'.format(name=p, value=v))
-                search_options.append(tmp_opt)
-
-    else:
-        # random search
-        max_len = 50
-        hy_params_his = set()  # history
-        for i in range(max_len):
-            opt_name = 'p_'
-            hy_params = {}
-            for p, vals in par_vals.items():
-                v = random.sample(vals, 1)[0]
-                hy_params[p] = v
-                opt_name += '{name}[{value}]_'.format(name=p, value=v)
-            if opt_name not in hy_params_his:  # check if has created before
-                hy_params_his.add(opt_name)
-                search_options.append(opt.set(hy_params, name=opt_name))
-
-    # filter drop_unlab <= drop_lab
-    search_options = filter(lambda option: option.drop_lab <= option.drop_unlab, search_options)
-
-    if semi_sup_compare:
-        semi_valid_ratio_scores = {}  # saved different scores with same options
-        logger.warning('have opened the semi_sup_compare!!!')
-    search_results = {d: [] for d in datasets}
-    best_result = 0
-    best_params = None
-    for dataset in datasets:
-        results = []
-        for search_option in search_options:
-            if semi_sup_compare and not is_valid_option(search_option.set({'dataset': dataset})):
-                continue
-            _ins = Instructor(search_option.set({'dataset': dataset}))
-            res = _ins.run()
-            results.append(res)
-            vr = '[dataset]:{dataset} [{option}] [result]:{result}'.format(dataset=dataset,
-                                                                           option=search_option.name,
-                                                                           result=res)
-            search_results[dataset].append(vr)
-            logger.info(vr)
-            acc = res['acc']
-            if acc > best_result:
-                best_result = acc
-                best_params = vr
-
-    logger.info('final results'.center(30, '*'))
-    logger.info('sys:{}'.format(sys.platform, ))
-    for d, res in search_results.items():
-        # d:dataset res:List[Str]
-        res = sorted(res) if len(par_vals) > 1 else res  # random search ,then sort the results
-        for r in res: logger.info(r)
-    logger.info('*' * 30)
-    logger.info('best params：{}'.format(best_params))
 
 
 def main():

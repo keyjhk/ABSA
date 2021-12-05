@@ -166,7 +166,6 @@ class PositionEncoder(nn.Module):
 
     def __init__(self,opt):
         super().__init__()
-        self.name = 'PositionEncoder'
         # atrribute
         self.uni_gru = DynamicGRU(opt.word_embedding_size + opt.position_embedding_size,
                                   opt.encoder_hidden_size,

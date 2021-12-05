@@ -2,8 +2,8 @@ import matplotlib.pyplot as plt
 # plot
 xlabel = 'weight window'
 ylabel = 'acc'
-x=[0,2,4,6,8]
-y=[81.49,81.93,81.96,81.4,81.49]  # res
+x=range(0,10)
+y=[75.39,75.29,75.86,74.71,75.03,74.4,75.6,74.29,75.81,76.23]  # res
 y1=[76.33,75.44,75.39,75.6,74.61]  # lap
 plt.xlabel(xlabel)
 plt.ylabel(ylabel)

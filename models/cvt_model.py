@@ -20,39 +20,32 @@ class CVTModel(nn.Module):
         super().__init__()
 
         self.inputs_cols = [
-            'context_indices',  'position_indices',
+            'context_indices', 'position_indices',
             'aspect_indices', 'aspect_boundary',
-            'polarity',
-            'len_s',
+            'polarity', 'len_s',
         ]
 
         self.mode = mode
         self.tokenizer = tokenizer
         self.opt = opt
         # cvt
-        self.unlabeled_loss = opt.unlabeled_loss
         # embedding for word/pos/polar
         self.word_embedding = nn.Embedding.from_pretrained(
             torch.tensor(pretrained_embedding, dtype=torch.float))
-        self.pos_embedding = nn.Embedding(num_pos, opt.pos_embedding_size)
-        self.polar_embedding = nn.Embedding(num_polar, opt.polar_embedding_size)
         self.position_embedding = nn.Embedding(num_position + 1, opt.position_embedding_size)
 
         # encoder
         self.encoder_hidden_size = opt.encoder_hidden_size
         self.encoder = PositionEncoder(opt)
-
         # primary
         self.primary = PolarDecoder(word_embedding=self.word_embedding,
                                     hidden_size=opt.encoder_hidden_size,
                                     num_polar=num_polar,
                                     tokenizer=tokenizer)
-
         # auxiliary
-        self.mask_strong = self.primary.clone('mask_strong')
         self.wo_weight = self.primary.clone('wo_weight')  # without weight
 
-        self.name = self.encoder.name
+        self.name = 'cvt'
 
         # loss
         self.loss = nn.CrossEntropyLoss()
@@ -82,7 +75,7 @@ class CVTModel(nn.Module):
         uni_out, uni_hidden = self.encoder(word, position, len_x, mode)
         uni_primary = uni_out[:, :, :self.encoder_hidden_size] + uni_out[:, :, self.encoder_hidden_size:]
         uni_weight = self.dynamic_features(uni_primary, position_indices, len_x, kind='weight')
-        uni_mask = self.dynamic_features(uni_weight, position_indices, len_x)
+        # uni_mask = self.dynamic_features(uni_weight, position_indices, len_x)
 
         # auxiliary modules out
 
@@ -94,18 +87,14 @@ class CVTModel(nn.Module):
         elif mode == "unlabeled":  # 无监督训练
             self._freeze_model()
             label_primary = self.primary(uni_weight, uni_hidden).detach()  # batch,num_polar
-            # mask strong
-            out_ms = self.mask_strong(uni_mask, uni_hidden)  # batch,num_polar,mask
             out_mw = self.wo_weight(uni_primary, uni_hidden)  # batch,num_polar ,not weighted
-
             loss_mw = F.kl_div(out_mw.log_softmax(dim=-1), label_primary.softmax(dim=-1), reduction='batchmean')
-
-            loss= loss_mw
+            loss = loss_mw
 
             return loss, label_primary, polarity
 
     def dynamic_features(self, features, position_indices, len_x,
-                         kind='mask'):
+                         kind='weight'):
         window_weight = self.opt.window_weight
         window_mask = self.opt.window_mask
         mask_ratio = self.opt.mask_ratio
@@ -156,15 +145,15 @@ class CVTModel(nn.Module):
 
         return aspect_pool
 
-
     def _freeze_model(self):
-        # freeze primary only; encoder is unfreezed
+        # freeze primary only
         self.primary.eval()
         self.primary.decoder.train()  # exclude decoder
         for name, params in self.primary.named_parameters():
             params.requires_grad = False
 
     def _unfreeze_model(self):
-        self.primary.train()
-        for params in self.primary.parameters():
-            params.requires_grad = True
+        if self.training:  # train mode
+            self.primary.train()
+            for params in self.primary.parameters():
+                params.requires_grad = True
