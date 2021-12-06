@@ -351,7 +351,7 @@ def build_indices(tokenizer, context, aspect, polarity, partition_token=ASPECT_R
     position_indices = tokenizer.text_to_position(context_len, aspect_boundary)
 
     return {'text_indices': text_indices, 'context_indices': context_indices,
-            'context':context,'len_s': context_len,
+            'context': context, 'len_s': context_len,
             'left_indices': left_indices, 'right_indices': right_indices,
             'aspect_indices': aspect_indices, 'aspect_boundary': aspect_boundary,
             'polarity': polarity, 'context_len': context_len,
@@ -415,7 +415,8 @@ class ABSADataset(Dataset):
                     aspect = f.readline().rstrip()
                     polarity = f.readline().rstrip()
 
-                    indices = build_indices(self.tokenizer, context, aspect, polarity,partition_token=ASPECT_REPLACE_TOKEN)
+                    indices = build_indices(self.tokenizer, context, aspect, polarity,
+                                            partition_token=ASPECT_REPLACE_TOKEN)
                     text_indices = indices['text_indices']
                     left_indices, aspect_indices, right_indices = indices['left_indices'], indices['aspect_indices'], \
                                                                   indices['right_indices']
@@ -602,29 +603,26 @@ class ABSADataset(Dataset):
 
 
 class MixDataLoader:
-    def __init__(self, labeled_loader, unlabeld_loader, eda_loader=None, semi_supervised=True):
+    def __init__(self, labeled_loader, unlabeld_loader, semi_supervised):
         self.labeled_loader = labeled_loader
         self.unlabeled_loader = unlabeld_loader
-        self.eda_loader = eda_loader
         self.semi_supervised = semi_supervised
         self.label_len = len(labeled_loader)
         self.unlabel_len = len(unlabeld_loader)
 
-    def _endless_labeled(self):
+    def _endless_batch(self, dataloader):
         while True:
-            for batch in self.labeled_loader:
+            for batch in dataloader:
                 yield batch
-            if self.eda_loader is not None:
-                for batch in self.eda_loader:
-                    yield batch
 
     def alternating_batch(self):
-        labeled_loader = self._endless_labeled()  # generator
-        while True:
-            for u_batch in self.unlabeled_loader:
-                yield next(labeled_loader), 'labeled'
-                if self.semi_supervised:
-                    yield u_batch, 'unlabeled'
+        labeled_loader = self._endless_batch(self.labeled_loader)  # generator
+        unlabeled_loader = self._endless_batch(self.unlabeled_loader)  # generator
+        for batch in unlabeled_loader:
+            yield next(labeled_loader), 'labeled'
+            if self.semi_supervised:
+                yield batch, 'unlabeled'
+
 
 if __name__ == '__main__':
     # if the tokenizer rebuild ,the embedding matrix should rebuilf too

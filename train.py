@@ -30,6 +30,7 @@ def time_cal(func):
 
     return inner
 
+
 class Instructor:
     def __init__(self, opt, logout=True):
         # set seed
@@ -125,6 +126,7 @@ class Instructor:
         if self.opt.unlabel_len is not None:
             unlabel_len = int(min(self.opt.unlabel_len, len(unlabelset)))
             _, unlabelset = random_split(unlabelset, [len(unlabelset) - unlabel_len, unlabel_len])
+
         # train
         if self.opt.train_len is not None:
             train_len = int(min(self.opt.train_len, len(trainset)))
@@ -146,6 +148,7 @@ class Instructor:
         self.trainloader = DataLoader(dataset=trainset, batch_size=batch_size, shuffle=True)
         self.validloader = DataLoader(dataset=validset, batch_size=batch_size, shuffle=True)
         self.testloader = DataLoader(dataset=testset, batch_size=batch_size, shuffle=True)
+
         unlabeled_loader = DataLoader(dataset=unlabelset, batch_size=batch_size, shuffle=True)
 
         self.mixloader = MixDataLoader(labeled_loader=self.trainloader,
@@ -230,7 +233,7 @@ class Instructor:
         loss = round(loss, 4)
         return acc, f1, loss
 
-    def predict(self, name,sample=None):
+    def predict(self, name, sample=None):
         # sample : context,aspect,polarity
         from data_utils import build_indices
         self.load(name)
@@ -254,19 +257,19 @@ class Instructor:
                     n_correct += (t_targets == t_outputs).sum()
                     n_total += t_targets.shape[0]
                     aspects = [tokenizer.sequence_to_text(indice) for indice in
-                                      batch['aspect_indices'].numpy()]
+                               batch['aspect_indices'].numpy()]
                     batch_contexts = [tokenizer.sequence_to_text(indice) for indice in
                                       batch['context_indices'].numpy()]  # batch
                     for i in range(target.shape[0]):
-                        _c,_a,_t,_o = batch_contexts[i],aspects[i], t_targets[i].item(), t_outputs[i].item()
+                        _c, _a, _t, _o = batch_contexts[i], aspects[i], t_targets[i].item(), t_outputs[i].item()
                         key = 'true' if t_targets[i] == t_outputs[i] else 'false'
-                        predict_results[key].append((_c,_a,_t,_o))
+                        predict_results[key].append((_c, _a, _t, _o))
 
                 print('total:{} correct:{} predict_true:{} predict_false:{}'.format(n_total, n_correct,
                                                                                     len(predict_results['true']),
                                                                                     len(predict_results['false'])))
-                pickle.dump(predict_results,open('state/'+saved_name+'.pkl','wb'))
-                with open('state/' + saved_name+'.txt', 'w') as f:
+                pickle.dump(predict_results, open('state/' + saved_name + '.pkl', 'wb'))
+                with open('state/' + saved_name + '.txt', 'w') as f:
                     for label, results in predict_results.items():
                         f.write(label.center(30, '=') + '\n')
                         for res in results:
@@ -276,18 +279,18 @@ class Instructor:
                         f.write('\n' * 3)
 
             else:
-                indices = build_indices(tokenizer,*sample,partition_token=sample[1])
+                indices = build_indices(tokenizer, *sample, partition_token=sample[1])
                 for key in indices.keys():
                     val = indices[key]
-                    if isinstance(val,numpy.ndarray) and val.size>1:
-                        indices[key] = torch.tensor(indices[key]).view(1,-1)
+                    if isinstance(val, numpy.ndarray) and val.size > 1:
+                        indices[key] = torch.tensor(indices[key]).view(1, -1)
                     else:
                         indices[key] = torch.tensor(indices[key]).view(1)
                 inputs = [indices[col].to(self.device) for col in self.inputs_cols]
                 _loss, out, target = model(*inputs)  # out:batch,num_polar ; target: batch
                 out = out.argmax(dim=-1)
-                print('sentence: {}\naspect: {}\npredict:{} target:{}'.format(sample[0],sample[1],out.item(),target.item()))
-
+                print('sentence: {}\naspect: {}\npredict:{} target:{}'.format(sample[0], sample[1], out.item(),
+                                                                              target.item()))
 
     def save(self, model, epoch, acc, f1):
         save_model_name = self.save_model_name
@@ -451,7 +454,6 @@ def set_logger(name=None, file=None, level=logging.INFO):
 
     logger.addHandler(logging.StreamHandler())  # console
     return logger
-
 
 
 def main():
