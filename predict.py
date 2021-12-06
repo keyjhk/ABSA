@@ -2,13 +2,13 @@ from train import Instructor
 from config import DEFAULT_OPTION
 
 if __name__ == '__main__':
-    opt = DEFAULT_OPTION
+    opt = DEFAULT_OPTION.set({'dataset': 'restaurant', 'clear_model': False})
     instrutor = Instructor(opt)
-    # model_cpt = 'laptop_1638717418_cvt_epoch18_acc_65.26_f1_58.52.pkl'   # sup lap
-    model_cpt = 'laptop_1638717634_cvt_epoch24_acc_69.33_f1_64.07.pkl'  # semi lap
 
-
-    sentence = 'apple is aware of this issue and this is either old stock or a defective design involving the intel 4000 graphics chipset .'
-    aspect = 'design'
-    polarity = 1
-    instrutor.predict(name=model_cpt,sample=(sentence,aspect,polarity))
+    # model_cpt = 'restaurant_semit.pkl'
+    model_cpt = 'restaurant_semif.pkl'
+    #
+    sentence = 'the staff members are extremely friendly and even replaced my drink once when i dropped it outside . '
+    aspect = 'drink'
+    polarity = 0  # -1  neg:0 neu:1 pos:2 null:-1(unlabeled)
+    instrutor.predict(name=model_cpt, sample=(sentence, aspect, polarity))

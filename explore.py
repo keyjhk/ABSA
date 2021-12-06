@@ -138,7 +138,7 @@ if __name__ == '__main__':
         # 'window_weight': range(1,10,2),
         # 'drop_lab': [x / 10 for x in range(1, 6)],
         # 'drop_unlab': [x / 10 for x in range(3, 9)],
-        'unlabel_len': [5000, 10000,15000,20000],
+        # 'unlabel_len': [5000, 10000,15000,20000],
         # 'train_len': [500, 1000,1500, None],
         # 'semi_supervised': [True, False],
         # 'use_weight': [False, True]
@@ -153,5 +153,5 @@ if __name__ == '__main__':
     #                   semi_sup_compare=True,
     #                   datasets=['laptop'])  # semi default laptop restaurant
     # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
-    parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=['restaurant'])  # semi default res
+    parameter_explore(opt.set({"semi_supervised": True,}), ps,datasets=['restaurant'])  # semi default res
     # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all#

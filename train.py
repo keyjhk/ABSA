@@ -243,7 +243,7 @@ class Instructor:
         predict_results = {'true': [], 'false': []}
         n_correct, n_total = 0, 0
 
-        saved_name = '{}_semi_{}_predict_results'.format(self.datasetname, self.semi_supervised)
+        saved_name = '{}_predict_results'.format(name.split('.')[0])
 
         with torch.no_grad():
             if not os.path.exists('state/' + saved_name + '.pkl'):
@@ -282,10 +282,17 @@ class Instructor:
                 indices = build_indices(tokenizer, *sample, partition_token=sample[1])
                 for key in indices.keys():
                     val = indices[key]
-                    if isinstance(val, numpy.ndarray) and val.size > 1:
-                        indices[key] = torch.tensor(indices[key]).view(1, -1)
+                    if isinstance(val, numpy.ndarray):
+                        if val.size>1:
+                            indices[key] = torch.tensor(val).view(1, -1)
+                        else:
+                            indices[key] = torch.tensor(val).view(1)
                     else:
-                        indices[key] = torch.tensor(indices[key]).view(1)
+                        try:
+                            indices[key] = torch.tensor(int(val)).view(1)
+                        except Exception:
+                            pass
+
                 inputs = [indices[col].to(self.device) for col in self.inputs_cols]
                 _loss, out, target = model(*inputs)  # out:batch,num_polar ; target: batch
                 out = out.argmax(dim=-1)
@@ -339,6 +346,7 @@ class Instructor:
         self.model.load_state_dict(model_cpt['model'])
 
         self.optimizer.load_state_dict(model_cpt['optimizer'])
+        return best_model_name
 
     def clear(self):
         self.logger.info('remove saved models'.center(30, '='))

@@ -60,6 +60,12 @@ class PolarDecoder(nn.Module):
         instance.decoder = self.decoder
         return instance
 
+    def export_max(self, encoder_out):
+        # export max for vision,called when debug
+        import pickle
+        max_indice = torch.max(encoder_out, dim=1, keepdim=True)[1]
+        pickle.dump(max_indice.cpu().numpy(), open('max_indice.pkl', 'wb'))
+
     def forward(self, encoder_out, last_hidden, mask_attention=None):
         # encoder: batch,seq_len,hidden_size ;
         # aspect : # batch,1,embed_dim
@@ -164,7 +170,7 @@ class RAMDecoder(nn.Module):
 
 class PositionEncoder(nn.Module):
 
-    def __init__(self,opt):
+    def __init__(self, opt):
         super().__init__()
         # atrribute
         self.uni_gru = DynamicGRU(opt.word_embedding_size + opt.position_embedding_size,
