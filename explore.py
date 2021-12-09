@@ -1,6 +1,7 @@
 # explore optim hyparameters
 from time import strftime, localtime
 import random, sys
+from data_utils import *
 from train import set_logger, Instructor
 from config import DEFAULT_OPTION
 
@@ -59,7 +60,7 @@ def parameter_explore(opt, par_vals, datasets=None, semi_sup_compare=False):
     for p in par_vals.keys():
         logger_fname += '_{}{}'.format(p, len(par_vals[p]))  # p_{parameter_name}{search_len}
     logger = set_logger(name='parameter_explore',
-                        file='{}_{}.log'.format(logger_fname, strftime("%m%d-%H%M", localtime())))
+                        file='{}_{}.log'.format(logger_fname, strftime("%m%d-%H%M%S", localtime())))
 
     # dynamic build search_options
     search_options = []
@@ -135,9 +136,9 @@ if __name__ == '__main__':
         # 'lr': [1e-2, 1e-3, 1e-4],
         # 'l2': [5e-3, 1e-3, 5e-4,1e-4,5e-5,1e-5],
         # 'encoder_hidden_size':[300,512,768,1024]
-        # 'window_weight': range(1,10,2),
+        'window_weight': range(0,10,2),
         # 'drop_lab': [x / 10 for x in range(1, 6)],
-        # 'drop_unlab': [x / 10 for x in range(3, 9)],
+        'drop_unlab': [x / 10 for x in range(3, 9)],
         # 'unlabel_len': [5000, 10000,15000,20000],
         # 'train_len': [500, 1000,1500, None],
         # 'semi_supervised': [True, False],
@@ -149,9 +150,9 @@ if __name__ == '__main__':
     # parameter_explore(opt, ps , datasets=datasets)  # super all
     # parameter_explore(opt, ps, datasets=['restaurant'])  # restaurant
     #
-    # parameter_explore(opt.set({"semi_supervised": True}), ps,
-    #                   semi_sup_compare=True,
-    #                   datasets=['laptop'])  # semi default laptop restaurant
+    parameter_explore(opt.set({"semi_supervised": True}), ps,
+                      semi_sup_compare=True,
+                      datasets=['laptop'])  # semi default laptop restaurant
     # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
-    parameter_explore(opt.set({"semi_supervised": True,}), ps,datasets=['restaurant'])  # semi default res
+    # parameter_explore(opt.set({"semi_supervised": True,}), ps,datasets=['restaurant'])  # semi default res
     # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all#

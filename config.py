@@ -50,7 +50,7 @@ PARAMETERS = {
     'mask_ratio': None,
     # cvt
     # res: 0.4 0.5  ; lap: 0.2 0.5
-    'drop_lab': 0.4,
+    'drop_lab': 0.5,
     'drop_unlab': 0.5,
 
 }
