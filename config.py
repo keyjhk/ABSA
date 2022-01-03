@@ -32,7 +32,7 @@ PARAMETERS = {
     # eval
     'eval_times': 3,
     # reproduce
-    'seed': 544,
+    'seed': 1234,  # 544,
     # optimizer
     'lr': 1e-3,
     'l2': 5e-3,
@@ -45,13 +45,12 @@ PARAMETERS = {
     "position_embedding_size": 50,
     "encoder_hidden_size": 300,  # 300
     # dynamic mask/weight
-    'window_weight': 0,  # res 0,lap 2
+    'window_weight': 8,  # res 0,lap 8
     "window_mask": None,
     'mask_ratio': None,
     # cvt
-    # res: 0.4 0.5  ; lap: 0.2 0.5
-    'drop_lab': 0.5,
-    'drop_unlab': 0.5,
+    'drop_lab': 0,
+    'drop_unlab': 0.6,  # res: 0.6, lap: 0.7
 
 }
 

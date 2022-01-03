@@ -82,6 +82,7 @@ class CVTModel(nn.Module):
         if mode == "labeled":  # 监督训练
             self._unfreeze_model()
             out = self.primary(uni_weight, uni_hidden)
+            # out = self.primary(uni_primary, uni_hidden)
             loss = self.loss(out, polarity)
             return loss, out, polarity
         elif mode == "unlabeled":  # 无监督训练

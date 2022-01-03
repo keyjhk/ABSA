@@ -15,6 +15,7 @@ def parameter_explore(opt, par_vals, datasets=None, semi_sup_compare=False):
         # valid_ratios = [0, 0.25, 0.5, 0.75]
         ratio_name = 'train_len'
         ratios = [None, 1500, 1000, 500]
+        # ratios = [None, 1500]
         # only these factors influence supervised
         valid_opt_name = '{lr}_{l2}_{window_weight}_{drop_lab}'.format(lr=opt.lr, l2=opt.l2,
                                                                        window_weight=opt.window_weight,
@@ -133,26 +134,46 @@ if __name__ == '__main__':
     opt = DEFAULT_OPTION
     ps = {
         # 'batch_size': [32, 64],
+        # 'seed': [random.randint(100,10000) for _ in range(3)],  # repeat just ,brings no influence
         # 'lr': [1e-2, 1e-3, 1e-4],
         # 'l2': [5e-3, 1e-3, 5e-4,1e-4,5e-5,1e-5],
         # 'encoder_hidden_size':[300,512,768,1024]
-        'window_weight': range(0,10,2),
-        # 'drop_lab': [x / 10 for x in range(1, 6)],
-        'drop_unlab': [x / 10 for x in range(3, 9)],
+        # 'window_weight': range(0,12,2),
+        # 'drop_lab': [x / 10 for x in rasnge(0, 5)],
+        # 'drop_unlab': [x / 10 for x in range(3, 9)],
         # 'unlabel_len': [5000, 10000,15000,20000],
-        # 'train_len': [500, 1000,1500, None],
+        # 'train_len': [500], # 500, 1000, 2000
         # 'semi_supervised': [True, False],
-        # 'use_weight': [False, True]
+        # 'use_weight': [False, True],
+
     }
 
-    datasets = opt.datasets.keys()
-    # parameter_explore(opt, ps)  # super default lap
-    # parameter_explore(opt, ps , datasets=datasets)  # super all
-    # parameter_explore(opt, ps, datasets=['restaurant'])  # restaurant
-    #
-    parameter_explore(opt.set({"semi_supervised": True}), ps,
-                      semi_sup_compare=True,
-                      datasets=['laptop'])  # semi default laptop restaurant
+    # datasets = opt.datasets.keys()
+    # datasets = ['laptop']
+    datasets = ['restaurant']
+
+    # seed
+    # seed = random.randint(100, 1234)
+    # print('random seed:', seed)
+    # opt = opt.set({'seed': None})
+
+    # clear model
+    # opt = opt.set({'clear_model': False})
+
+    if datasets == ['laptop']:
+        sup_opt = opt.set({'drop_lab': 0, 'window_weight': 8})
+        semi_opt = opt.set({"semi_supervised": True, 'drop_lab': 0, 'drop_unlab': 0.7,
+                            'window_weight': 8})
+    elif datasets == ['restaurant']:
+        sup_opt = opt.set({'drop_lab': 0, 'window_weight': 0})
+        semi_opt = opt.set({"semi_supervised": True, 'drop_lab': 0, 'drop_unlab': 0.6,
+                            'window_weight': 0})
+
+    parameter_explore(sup_opt, ps, datasets=datasets)
+    # parameter_explore(semi_opt, ps, datasets=datasets)
+    # parameter_explore(semi_opt, ps,
+    #                   semi_sup_compare=True,
+    #                   datasets=datasets)  # semi default laptop restaurant
     # parameter_explore(opt.set({"semi_supervised": True}), ps)  # semi default lap
     # parameter_explore(opt.set({"semi_supervised": True,}), ps,datasets=['restaurant'])  # semi default res
-    # parameter_explore(opt.set({"ssemi_supervised": True}), ps,datasets=datasets)  # semi all#
+    # parameter_explore(opt.set({"semi_supervised": True}), ps,datasets=datasets)  # semi all#

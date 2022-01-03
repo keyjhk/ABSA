@@ -624,20 +624,65 @@ class MixDataLoader:
                 yield batch, 'unlabeled'
 
 
+def srd_statistic(tokenizer, fname,threshold):
+    _senti_dict = tokenizer.sentidict
+    senti_dict = {}
+    for word, polar in _senti_dict.senti_dict.items():
+        word = word.split('#')[0]
+        if word in senti_dict:
+            senti_dict[word].append(polar)
+        else:
+            senti_dict[word] = [polar]
+
+    for word, polars in senti_dict.copy().items():
+        senti_dict[word] = sum(polars) / len(polars)
+
+    avg_polar = 0
+    total_sentence = 0
+    with open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore') as f:
+        while True:
+            context = f.readline().rstrip()
+            if context:
+                aspect = f.readline().rstrip()
+                polarity = f.readline().rstrip()
+                words = tokenizer.tokenize(context)
+
+                aspect_index = words.index(ASPECT_REPLACE_TOKEN.lower())
+
+                sentence_polarity = 0
+                for i, word in enumerate(words):
+                    srd = abs(i - aspect_index)
+                    if srd >threshold or i == aspect_index: continue  # inner
+                    if senti_dict.get(word):
+                        # sentence_polarity += senti_dict[word] / srd
+                        sentence_polarity += senti_dict[word]
+                        # print(word,senti_dict[word])
+
+                avg_polar += sentence_polarity
+                total_sentence += 1
+
+            else:
+                break
+
+        avg_polar /= total_sentence
+        print('threshold:{} avg_polar:{}'.format(threshold,avg_polar))
+        return avg_polar
+
+
 if __name__ == '__main__':
     # if the tokenizer rebuild ,the embedding matrix should rebuilf too
     # because the word:idx map has changed ,but the embeding matrix may
     # reload from the disk
     tokenizer = build_tokenizer(max_seq_len=MAX_SEQ_LEN)
-    embed_matrix = build_embedding_matrix(tokenizer.word2idx)
+    # embed_matrix = build_embedding_matrix(tokenizer.word2idx)
 
     # augmentation
     # da = DataAug(fnames=TRAIN_FILES, embed_matrix=embed_matrix, tokenizer=tokenizer)
     # da.augmentation()
 
     # labeled
-    ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
-    ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
+    # ABSADataset(fname='data/semeval14/Laptops_Train.xml.seg', tokenizer=tokenizer)
+    # ABSADataset(fname='data/semeval14/Laptops_Test_Gold.xml.seg', tokenizer=tokenizer)
     # ABSADataset(fname='data/semeval14/Restaurants_Train.xml.seg', tokenizer=tokenizer)
     # ABSADataset(fname='data/semeval14/Restaurants_Test_Gold.xml.seg', tokenizer=tokenizer)
     # # unlabeled
@@ -646,3 +691,17 @@ if __name__ == '__main__':
     # # eda
     # eda_lap=ABSADataset(fname='data/eda/eda_Laptops_Train.xml.seg', tokenizer=tokenizer)
     # eda_res=ABSADataset(fname='data/eda/eda_Restaurants_Train.xml.seg', tokenizer=tokenizer)
+
+    # inner:avg_polar:0.13978292639843015 out:0.08777263488992858
+    # srd_statistic(tokenizer, fname='data/semeval14/Laptops_Train.xml.seg')
+    # inner:avg_polar:0.10207380293987912         out:avg_polar:0.10207380293987912
+    # srd_statistic(tokenizer, fname='data/unlabeled/formated_electronic.txt')  # 4.92296918767507
+    # srd_statistic(tokenizer, fname='data/unlabeled/formated_yelp_review.txt')  # 5.202575428807607
+
+    print('restaurant')
+    for i in range(2,12,2):
+        srd_statistic(tokenizer, 'data/semeval14/Restaurants_Train.xml.seg', i)  # 4.57854630715123
+    print('='*30)
+    print('laptop')
+    for i in range(2,12,2):
+        srd_statistic(tokenizer, 'data/semeval14/Laptops_Train.xml.seg', i)  # 4.57854630715123

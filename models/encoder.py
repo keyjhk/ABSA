@@ -1,3 +1,5 @@
+import os
+
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
@@ -62,9 +64,23 @@ class PolarDecoder(nn.Module):
 
     def export_max(self, encoder_out):
         # export max for vision,called when debug
-        import pickle
+        import pickle, time
         max_indice = torch.max(encoder_out, dim=1, keepdim=True)[1]
-        pickle.dump(max_indice.cpu().numpy(), open('max_indice.pkl', 'wb'))
+        fname = 'state/predict/max_pool_{}.pkl'
+        if os.path.exists(fname.format('sup')) and os.path.exists(fname.format('cvt')):
+            # remove last pkl
+            print('removing exist models')
+            os.remove(fname.format('sup'))
+            os.remove(fname.format('cvt'))
+            fname=fname.format('sup')
+        elif os.path.exists(fname.format('sup')):
+            fname=fname.format('cvt')
+        else:
+            fname=fname.format('sup')
+        
+        print('exporting {} ...'.format(fname))
+        pickle.dump(max_indice.cpu().numpy(), open(fname, 'wb'))
+        time.sleep(1)
 
     def forward(self, encoder_out, last_hidden, mask_attention=None):
         # encoder: batch,seq_len,hidden_size ;
@@ -92,6 +108,7 @@ class PolarDecoder(nn.Module):
         context = torch.bmm(score, encoder_out)  # batch,1,hidden_size
 
         smax = torch.max(encoder_out, dim=1, keepdim=True)[0]  # batch,1,hidden_size
+        self.export_max(encoder_out)
         ch = torch.cat((context, decoder_out, smax), dim=-1)  # batch,1,hidden_size*3
         ch = ch.squeeze(1)  # batch,hidden_size*3
 
@@ -176,12 +193,16 @@ class PositionEncoder(nn.Module):
         self.uni_gru = DynamicGRU(opt.word_embedding_size + opt.position_embedding_size,
                                   opt.encoder_hidden_size,
                                   batch_first=True, bidirectional=True)
+        # self.uni_gru = DynamicGRU(opt.word_embedding_size,
+        #                           opt.encoder_hidden_size,
+        #                           batch_first=True, bidirectional=True)
         self.uni_dropout_lab = nn.Dropout(p=opt.drop_lab)
         self.uni_dropout_unlab = nn.Dropout(p=opt.drop_unlab)
 
     def forward(self, word, position, len_x, mode):
         # word/pos/polar: batch,MAX_LEN,embedding_size  ;len_x:batch
         x = torch.cat((word, position), dim=-1)
+        # x = word
         uni_out, uni_hidden = self.uni_gru(x, len_x.cpu())
         if mode == 'labeled':
             uni_out = self.uni_dropout_lab(uni_out)

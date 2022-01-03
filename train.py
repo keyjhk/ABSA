@@ -235,69 +235,83 @@ class Instructor:
 
     def predict(self, name, sample=None):
         # sample : context,aspect,polarity
+        saved_dir = 'state/predict/'
+        saved_name = '{}_predict_results'.format(''.join(name.split('.')[:-1]))  # remove suffix
+
         from data_utils import build_indices
         self.load(name)
         model = self.model
         model.eval()
         tokenizer = self.tokenizer
-        predict_results = {'true': [], 'false': []}
+        predict_results = {'true': [], 'false': []}  # (context,aspect,target,prediction)
         n_correct, n_total = 0, 0
 
-        saved_name = '{}_predict_results'.format(name.split('.')[0])
-
         with torch.no_grad():
-            if not os.path.exists('state/' + saved_name + '.pkl'):
-                # create predict results and stored then :
-                self.logger.info('create predict results……')
-                dataloader = self.testloader
+            if not sample:
+                if not os.path.exists(saved_dir + saved_name + '.pkl'):
+                    # create predict results and stored then :
+                    self.logger.info('create predict results……')
+                    dataloader = self.testloader
+                    for batch in dataloader:
+                        inputs = [batch[col].to(self.device) for col in self.inputs_cols]
+                        _loss, out, target = model(*inputs)  # out:batch,num_polar ; target: batch
+                        t_targets, t_outputs = target, out.argmax(dim=-1)  # batch
+                        n_correct += (t_targets == t_outputs).sum()
+                        n_total += t_targets.shape[0]
+
+                        aspects = [tokenizer.sequence_to_text(indice) for indice in
+                                   batch['aspect_indices'].numpy()]
+                        batch_contexts = [tokenizer.sequence_to_text(indice) for indice in
+                                          batch['context_indices'].numpy()]  # batch
+                        # statistic true prediction and false prediction each batch
+                        for i in range(target.shape[0]):
+                            _c, _a, _t, _o = batch_contexts[i], aspects[i], t_targets[i].item(), t_outputs[i].item()
+                            key = 'true' if t_targets[i] == t_outputs[i] else 'false'
+                            predict_results[key].append((_c, _a, _t, _o))
+
+                    print('total:{} acc:{} predict_true:{} predict_false:{}'.format(n_total, n_correct * 100 / n_total,
+                                                                                    len(predict_results['true']),
+                                                                                    len(predict_results['false'])))
+                    # export predict results
+                    self.logger.info('writing {}.pkl ....'.format(saved_name))
+                    self.logger.info('writing {}.txt ....'.format(saved_name))
+                    pickle.dump(predict_results, open(saved_dir + saved_name + '.pkl', 'wb'))
+                    with open(saved_dir + saved_name + '.txt', 'w') as f:
+                        for label, results in predict_results.items():
+                            f.write(label.center(30, '=') + '\n')
+                            for res in results:
+                                text = '\n'.join([str(x) for x in res])  # context ,target,predict
+                                text += '\n' * 2
+                                f.write(text)
+                            f.write('\n' * 3)
+
+                return saved_dir + saved_name + '.pkl'
+            else:
+                # predict for a given sample
+                # format the sentence
+                indices = build_indices(tokenizer, *sample, partition_token=sample[1])
+                dataloader = DataLoader(dataset=[indices], batch_size=1)
+                # for key in indices.keys():  # to tensor
+                #     val = indices[key]
+                #     if isinstance(val, numpy.ndarray):
+                #         if val.size > 1:
+                #             indices[key] = torch.tensor(val).view(1, -1)
+                #         else:
+                #             indices[key] = torch.tensor(val).view(1)
+                #     else:
+                #         try:
+                #             indices[key] = torch.tensor(int(val)).view(1)
+                #         except Exception:
+                #             pass
+                # feed it into the model
                 for batch in dataloader:
                     inputs = [batch[col].to(self.device) for col in self.inputs_cols]
                     _loss, out, target = model(*inputs)  # out:batch,num_polar ; target: batch
-                    t_targets, t_outputs = target, out.argmax(dim=-1)  # batch
-                    n_correct += (t_targets == t_outputs).sum()
-                    n_total += t_targets.shape[0]
-                    aspects = [tokenizer.sequence_to_text(indice) for indice in
-                               batch['aspect_indices'].numpy()]
-                    batch_contexts = [tokenizer.sequence_to_text(indice) for indice in
-                                      batch['context_indices'].numpy()]  # batch
-                    for i in range(target.shape[0]):
-                        _c, _a, _t, _o = batch_contexts[i], aspects[i], t_targets[i].item(), t_outputs[i].item()
-                        key = 'true' if t_targets[i] == t_outputs[i] else 'false'
-                        predict_results[key].append((_c, _a, _t, _o))
-
-                print('total:{} correct:{} predict_true:{} predict_false:{}'.format(n_total, n_correct,
-                                                                                    len(predict_results['true']),
-                                                                                    len(predict_results['false'])))
-                pickle.dump(predict_results, open('state/' + saved_name + '.pkl', 'wb'))
-                with open('state/' + saved_name + '.txt', 'w') as f:
-                    for label, results in predict_results.items():
-                        f.write(label.center(30, '=') + '\n')
-                        for res in results:
-                            text = '\n'.join([str(x) for x in res])  # context ,target,predict
-                            text += '\n' * 2
-                            f.write(text)
-                        f.write('\n' * 3)
-
-            else:
-                indices = build_indices(tokenizer, *sample, partition_token=sample[1])
-                for key in indices.keys():
-                    val = indices[key]
-                    if isinstance(val, numpy.ndarray):
-                        if val.size>1:
-                            indices[key] = torch.tensor(val).view(1, -1)
-                        else:
-                            indices[key] = torch.tensor(val).view(1)
-                    else:
-                        try:
-                            indices[key] = torch.tensor(int(val)).view(1)
-                        except Exception:
-                            pass
-
-                inputs = [indices[col].to(self.device) for col in self.inputs_cols]
-                _loss, out, target = model(*inputs)  # out:batch,num_polar ; target: batch
-                out = out.argmax(dim=-1)
-                print('sentence: {}\naspect: {}\npredict:{} target:{}'.format(sample[0], sample[1], out.item(),
-                                                                              target.item()))
+                    out = out.argmax(dim=-1)
+                    print('sentence: {}\naspect: {}\n'
+                          'predict:{} target:{}'.format(sample[0], sample[1],
+                                                        out.item(), target.item()))
+                return out.item
 
     def save(self, model, epoch, acc, f1):
         save_model_name = self.save_model_name
@@ -466,7 +480,10 @@ def set_logger(name=None, file=None, level=logging.INFO):
 
 def main():
     opt = DEFAULT_OPTION
-    instrutor = Instructor(opt)
+    lap_opt = opt.set({'dataset': 'laptop', 'drop_lab': 0.2, 'window_weight': 2})
+    res_opt = opt.set({'dataset': 'restaurant', 'drop_lab': 0.4, 'window_weight': 0})
+    instrutor = Instructor(res_opt)
+    # instrutor = Instructor(lap_opt)
     instrutor.run()
 
 
