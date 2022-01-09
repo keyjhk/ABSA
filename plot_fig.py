@@ -23,8 +23,8 @@ def less_labeled_data():
     ax1.set_xlabel(xlabel)
     ax1.set_ylabel(ylabel)
     ax1.set_title('Restaurant14')
-    ax1.plot(x, y_sup, marker='o', label='PAN')
-    ax1.plot(x, y_cvt, marker='o', label='PAN-CVT')
+    ax1.plot(x, y_sup, marker='o', label='PAN-WC')
+    ax1.plot(x, y_cvt, marker='o', label='PAN')
     ax1.legend()
     ax1.grid()
 
@@ -34,15 +34,16 @@ def less_labeled_data():
     ax2.set_title('Laptop14')
     y_sup = [62.54, 65.99, 67.83, 70.15]  # lap
     y_cvt = [65.57, 69.4, 70.21, 71.21]
-    ax2.plot(x, y_sup, marker='o', label='PAN')
-    ax2.plot(x, y_cvt, marker='o', label='PAN-CVT')
+    ax2.plot(x, y_sup, marker='o', label='PAN-WC')
+    ax2.plot(x, y_cvt, marker='o', label='PAN')
     ax2.set_xlabel(xlabel)
     ax2.set_ylabel(ylabel)
     ax2.legend()
     ax2.grid()
     # annotate
-    # for px, py in zip(x, y_sup,y_cvt):
-    #     plt.annotate(text=str(py), xy=(px, py), xytext=(px, py + 0.1))
+    # for px, pys,pyc in zip(x, y_sup,y_cvt):
+    #     plt.annotate(text=str(pys), xy=(px, pys), xytext=(px-0.5, pys + 0.1))
+    #     plt.annotate(text=str(pyc), xy=(px, pyc), xytext=(px-0.5, pyc + 0.1))
     plt.savefig('state/figures/less_labeled data.png')
     plt.show()
 
@@ -108,7 +109,7 @@ def srd_more_laptop():
     plt.show()
 
 if __name__ == '__main__':
-    # less_labeled_data()
+    less_labeled_data()
     # srd()
     # lcf_senti()
-    srd_more_laptop()
+    # srd_more_laptop()

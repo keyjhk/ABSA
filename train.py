@@ -309,7 +309,7 @@ class Instructor:
                     _loss, out, target = model(*inputs)  # out:batch,num_polar ; target: batch
                     out = out.argmax(dim=-1)
                     print('sentence: {}\naspect: {}\n'
-                          'predict:{} target:{}'.format(sample[0], sample[1],
+                          'predict:{} target:{}\n'.format(sample[0], sample[1],
                                                         out.item(), target.item()))
                 return out.item
 

@@ -94,7 +94,7 @@ def analyze_sample(sentence, aspect, polarity):
     instructor.predict(model_cpt_cvt, sample)
 
 
-def heatmap(sentence, aspect='', target=''):
+def heatmap(sentence, aspect='', target='',false_p=''):
     def count_max(array):
         max_counts = []
         for i in range(len(words)):
@@ -117,8 +117,8 @@ def heatmap(sentence, aspect='', target=''):
     ax = plt.gca()
     # matshow 返回对象  AxesImage
     cax = ax.matshow(stack, cmap='Blues')
-    title = '【{}】 【{}】 【{}】'.format(sentence, aspect, target)
-    # ax.set_title(title)
+    title = '【{}】【{}】【{}】'.format(aspect, target,false_p)
+    # ax.set_title(sentence)
 
     # 刻度
     # 如果不添加刻度的话 就会默认显示012 这样的数字索引
@@ -129,7 +129,7 @@ def heatmap(sentence, aspect='', target=''):
     xticklabels = [''] + words
     yticklabels = [''] + ['no-cvt', 'cvt']
 
-    ax.set_xticklabels(xticklabels, rotation=90)  # 设置x轴刻度标签
+    ax.set_xticklabels(xticklabels, rotation=70)  # 设置x轴刻度标签
     ax.set_yticklabels(yticklabels)
 
     # majorlocator 是用于调整刻度间距的
@@ -137,7 +137,7 @@ def heatmap(sentence, aspect='', target=''):
     ax.xaxis.set_major_locator(ticker.MultipleLocator(1))
     ax.yaxis.set_major_locator(ticker.MultipleLocator(1))
     plt.savefig(saved_dir + 'figures/' + '{}.png'.format(title))
-    plt.show()
+    # plt.show()
 
 
 if __name__ == '__main__':
@@ -152,12 +152,12 @@ if __name__ == '__main__':
     print(len(intersection))
     for item in intersection:
         c, a, t, p_cvt, p_sup = item
-        # print('{}\n{}\n t:[{}] cvt:[{}] sup:[{}]'.format(c, a, t, p_cvt, p_sup))
+        print('{}\n{}\n t:[{}] cvt:[{}] sup:[{}]'.format(c, a, t, p_cvt, p_sup))
         analyze_sample(c, a, t - 1)
-        heatmap(c, a, intersection.labels[t])
+        heatmap(c, a, intersection.labels[t],intersection.labels[p_sup])
         print('=' * 30)
-        time.sleep(1)
-        exit()
+        # time.sleep(1)
+        # exit()
 
     # an sample
     # sentence = "this particular location certainly uses substandard meats ."
